@@ -17,7 +17,7 @@ export default defineConfig(({ mode }) => {
         react(),
         VitePWA({
           registerType: 'autoUpdate',
-          includeAssets: ['icon.svg', 'manifest.webmanifest'],
+          includeAssets: ['icon.svg'],
           manifest: {
             name: 'M&S Construcción',
             short_name: 'M&S',
