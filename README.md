@@ -23,6 +23,22 @@ View your app in AI Studio: https://ai.studio/apps/temp/2
 3. Run the app:
    `npm run dev`
 
+## Deploy a GitHub Pages
+
+Este repo está configurado para desplegarse automáticamente a GitHub Pages con GitHub Actions.
+
+1) En GitHub: **Settings → Pages → Build and deployment → Source: GitHub Actions**.
+2) Hacer push a `main`.
+3) El workflow publicará la carpeta `dist/`.
+
+URL esperada:
+
+`https://salazaroliveros-prog.github.io/M-S-WM-CORP_4_App/`
+
+Si quieres probar el build de Pages local:
+
+`npm run build:pages`
+
 ## Catálogo APU + Precios (importación web segura)
 
 La app **no hace scraping** automático de sitios. Para mantener datos **seguros y trazables**, se importan desde una URL explícita (CSV/JSON) que usted controle o desde APIs oficiales con permiso.
