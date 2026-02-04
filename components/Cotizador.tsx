@@ -116,6 +116,8 @@ const Cotizador: React.FC<Props> = ({ initialData }) => {
                   className="w-full p-3 border rounded print:appearance-none print:border-none print:bg-transparent print:p-0 print:text-navy-900"
                   value={selectedService}
                   onChange={e => setSelectedService(e.target.value)}
+                  title="Seleccionar servicio"
+                  aria-label="Seleccionar servicio"
                 >
                   <option value="">Seleccione servicio...</option>
                   {QUOTE_SERVICES.map(s => (
@@ -132,6 +134,9 @@ const Cotizador: React.FC<Props> = ({ initialData }) => {
                   min="1"
                   value={quantity}
                   onChange={e => setQuantity(Number(e.target.value))}
+                  placeholder="1"
+                  title="Cantidad"
+                  aria-label="Cantidad"
                   className="w-full p-3 border rounded print:border-none print:bg-transparent print:p-0"
                 />
               </div>

@@ -1,0 +1,17 @@
+{
+  "name": "M&S Construcción",
+  "short_name": "M&S",
+  "description": "Sistema integral de gestión: Proyectos, Presupuestos, Seguimiento, Compras y RRHH.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0A192F",
+  "theme_color": "#0A192F",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

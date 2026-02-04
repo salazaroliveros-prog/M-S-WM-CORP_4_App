@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Project, BudgetLine, Typology, MaterialItem, RequisitionData } from '../types';
 import { DEFAULT_BUDGET_LINES, calculateAPU } from '../constants';
 import { Printer, Save, RefreshCw, Upload, Download, AlertTriangle, CheckCircle, ChevronDown, ChevronUp, Plus, Trash2, Calculator, ShoppingCart, ArrowRight, X, List } from 'lucide-react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 interface Props {
   projects: Project[];
@@ -168,6 +170,455 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
     } catch (e: any) {
       setImportStatus({ type: 'error', message: e?.message || 'Error guardando presupuesto' });
     }
+  };
+
+  const handlePrintExecutiveReport = () => {
+    if (!selectedProjectId || !typology) {
+      setImportStatus({ type: 'error', message: 'Seleccione un proyecto para imprimir.' });
+      return;
+    }
+    const project = projects.find(p => p.id === selectedProjectId);
+    if (!project) {
+      setImportStatus({ type: 'error', message: 'Proyecto no encontrado.' });
+      return;
+    }
+    if (budgetLines.length === 0) {
+      setImportStatus({ type: 'info', message: 'No hay renglones para imprimir.' });
+      return;
+    }
+
+    const now = new Date();
+    const fmtMoney = (n: number) => `Q${n.toFixed(2)}`;
+
+    const sanitizeFileName = (input: string) =>
+      String(input || 'reporte')
+        .normalize('NFKD')
+        .replace(/[^a-zA-Z0-9\-_\.\s]/g, '')
+        .trim()
+        .replace(/\s+/g, '-')
+        .slice(0, 80);
+
+    try {
+      const doc = new jsPDF({ orientation: 'p', unit: 'pt', format: 'a4' });
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+
+      const safeNum = (v: any): number => (Number.isFinite(Number(v)) ? Number(v) : 0);
+      const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+      const fmtPct = (v: number) => `${v.toFixed(1)}%`;
+
+      const getChapterNumber = (name: string): number | null => {
+        const m = String(name || '').match(/^\s*(\d+)\s*\./);
+        if (!m) return null;
+        const n = parseInt(m[1], 10);
+        return Number.isFinite(n) ? n : null;
+      };
+
+      const getChapterBucketLabel = (chapterNumber: number | null): string => {
+        if (!chapterNumber || chapterNumber <= 0) return 'Sin capítulo';
+        const bucket = Math.floor((chapterNumber - 1) / 10);
+        const start = bucket * 10 + 1;
+        const end = start + 9;
+        return `Capítulos ${start}–${end}`;
+      };
+
+      // --- Executive calculations used across cover + report ---
+      const calcLineUnitMaterials = (line: BudgetLine): number =>
+        (line.materials || []).reduce((sum, m) => sum + safeNum(m.quantityPerUnit) * safeNum(m.unitPrice), 0);
+
+      const costParts = budgetLines.reduce(
+        (acc, line) => {
+          const qty = safeNum(line.quantity);
+          const matUnit = calcLineUnitMaterials(line);
+          acc.materials += matUnit * qty;
+          acc.labor += safeNum(line.laborCost) * qty;
+          acc.equipment += safeNum(line.equipmentCost) * qty;
+          return acc;
+        },
+        { materials: 0, labor: 0, equipment: 0 }
+      );
+
+      const partsTotal = costParts.materials + costParts.labor + costParts.equipment;
+      const cdDenom = safeNum(totalDirectCost) > 0 ? safeNum(totalDirectCost) : partsTotal;
+      const pct = (v: number) => (cdDenom > 0 ? (v / cdDenom) * 100 : 0);
+
+      // --- Cover page (Portada + KPIs + chart + signatures) ---
+      const coverPadX = 40;
+      doc.setFillColor(10, 25, 47);
+      doc.rect(0, 0, pageWidth, 110, 'F');
+      doc.setTextColor(251, 191, 36);
+      doc.setFontSize(22);
+      doc.text('M&S Construcción', coverPadX, 52);
+      doc.setTextColor(229, 231, 235);
+      doc.setFontSize(11);
+      doc.text('Reporte Ejecutivo de Presupuesto', coverPadX, 78);
+      doc.text(`${now.toLocaleDateString('es-GT')} ${now.toLocaleTimeString('es-GT')}`, pageWidth - coverPadX, 52, { align: 'right' });
+
+      doc.setTextColor(17, 24, 39);
+      doc.setFontSize(16);
+      doc.text(String(project.name || ''), coverPadX, 146);
+      doc.setFontSize(10);
+      doc.setTextColor(55, 65, 81);
+      doc.text(`Cliente: ${String(project.clientName || '-')}`, coverPadX, 166);
+      doc.text(`Ubicación: ${String(project.location || '-')}`, coverPadX, 182);
+      doc.text(`Tipología: ${String(project.typology || '-')}`, coverPadX, 198);
+      doc.text(`Responsable: ${String(project.projectManager || '-')}`, coverPadX, 214);
+
+      const drawKpiCard = (x: number, y: number, w: number, h: number, label: string, value: string) => {
+        doc.setDrawColor(209, 213, 219);
+        doc.setFillColor(249, 250, 251);
+        doc.roundedRect(x, y, w, h, 8, 8, 'FD');
+        doc.setTextColor(107, 114, 128);
+        doc.setFontSize(9);
+        doc.text(label, x + 12, y + 18);
+        doc.setTextColor(17, 24, 39);
+        doc.setFontSize(13);
+        doc.text(value, x + 12, y + 40);
+      };
+
+      const kpiY = 238;
+      const cardW = (pageWidth - coverPadX * 2 - 16) / 2;
+      const cardH = 58;
+      drawKpiCard(coverPadX, kpiY, cardW, cardH, 'Costo Directo (CD)', fmtMoney(safeNum(totalDirectCost)));
+      drawKpiCard(coverPadX + cardW + 16, kpiY, cardW, cardH, 'Costo Indirecto (CI)', fmtMoney(safeNum(indirectCost)));
+      drawKpiCard(coverPadX, kpiY + cardH + 14, cardW, cardH, 'Subtotal (sin IVA)', fmtMoney(safeNum(priceNoTax)));
+      drawKpiCard(coverPadX + cardW + 16, kpiY + cardH + 14, cardW, cardH, 'Precio Final', fmtMoney(safeNum(finalPrice)));
+
+      // Simple composition chart
+      const chartY = kpiY + (cardH * 2) + 44;
+      doc.setTextColor(17, 24, 39);
+      doc.setFontSize(12);
+      doc.text('Composición del Costo Directo (CD)', coverPadX, chartY);
+
+      const chartX = coverPadX;
+      const chartW = pageWidth - coverPadX * 2;
+      const barY = chartY + 14;
+      const barH = 18;
+      const matRatio = cdDenom > 0 ? costParts.materials / cdDenom : 0;
+      const laborRatio = cdDenom > 0 ? costParts.labor / cdDenom : 0;
+      const equipRatio = cdDenom > 0 ? costParts.equipment / cdDenom : 0;
+      const ratios = [clamp01(matRatio), clamp01(laborRatio), clamp01(equipRatio)];
+      const colors: Array<[number, number, number]> = [
+        [59, 130, 246],  // blue
+        [34, 197, 94],   // green
+        [245, 158, 11],  // amber
+      ];
+      const labels = ['Materiales', 'Mano de obra', 'Equipo'];
+      const values = [costParts.materials, costParts.labor, costParts.equipment];
+      const percents = [pct(costParts.materials), pct(costParts.labor), pct(costParts.equipment)];
+
+      // Background bar
+      doc.setDrawColor(229, 231, 235);
+      doc.setFillColor(243, 244, 246);
+      doc.roundedRect(chartX, barY, chartW, barH, 6, 6, 'FD');
+
+      let segX = chartX;
+      ratios.forEach((r, i) => {
+        const w = chartW * r;
+        if (w <= 0.5) return;
+        doc.setFillColor(colors[i][0], colors[i][1], colors[i][2]);
+        doc.rect(segX, barY, w, barH, 'F');
+        segX += w;
+      });
+
+      // Legend
+      let legendY = barY + barH + 18;
+      doc.setFontSize(9);
+      labels.forEach((lab, i) => {
+        doc.setFillColor(colors[i][0], colors[i][1], colors[i][2]);
+        doc.rect(chartX, legendY - 8, 10, 10, 'F');
+        doc.setTextColor(55, 65, 81);
+        doc.text(`${lab}: ${fmtMoney(values[i])} (${fmtPct(percents[i])})`, chartX + 16, legendY);
+        legendY += 14;
+      });
+
+      // Signature lines
+      const sigY = pageHeight - 120;
+      doc.setTextColor(55, 65, 81);
+      doc.setFontSize(10);
+      const sigW = (pageWidth - coverPadX * 2 - 40) / 3;
+      const sigLabels = ['Elaboró', 'Revisó', 'Aprobó'];
+      sigLabels.forEach((lab, i) => {
+        const x = coverPadX + i * (sigW + 20);
+        doc.setDrawColor(156, 163, 175);
+        doc.line(x, sigY + 26, x + sigW, sigY + 26);
+        doc.text(lab, x, sigY + 44);
+      });
+
+      // Start actual report on next page
+      doc.addPage();
+
+      // Header band (report pages)
+      doc.setFillColor(10, 25, 47);
+      doc.rect(0, 0, pageWidth, 72, 'F');
+      doc.setTextColor(251, 191, 36);
+      doc.setFontSize(18);
+      doc.text('M&S Construcción', 40, 34);
+      doc.setTextColor(229, 231, 235);
+      doc.setFontSize(10);
+      doc.text('Reporte Ejecutivo de Presupuesto', 40, 52);
+      doc.text(`${now.toLocaleDateString('es-GT')} ${now.toLocaleTimeString('es-GT')}`, pageWidth - 40, 34, { align: 'right' });
+
+      let cursorY = 92;
+      doc.setTextColor(17, 24, 39);
+      doc.setFontSize(14);
+      doc.text(`Proyecto: ${String(project.name || '')}`, 40, cursorY);
+      cursorY += 18;
+
+      doc.setFontSize(10);
+      doc.setTextColor(55, 65, 81);
+      doc.text(`Cliente: ${String(project.clientName || '-')}`, 40, cursorY);
+      cursorY += 14;
+      doc.text(`Ubicación: ${String(project.location || '-')}`, 40, cursorY);
+      cursorY += 14;
+      doc.text(`Tipología: ${String(project.typology || '-')}`, 40, cursorY);
+      cursorY += 14;
+      doc.text(`Responsable: ${String(project.projectManager || '-')}`, 40, cursorY);
+      cursorY += 18;
+
+      // Summary table (report pages)
+      autoTable(doc, {
+        startY: cursorY,
+        theme: 'grid',
+        head: [['Resumen', 'Valor']],
+        body: [
+          ['Costo Directo Total', fmtMoney(safeNum(totalDirectCost))],
+          ['Indirectos (%)', `${String(indirectCostPercentageStr || '0')}%`],
+          ['Costo Indirecto', fmtMoney(safeNum(indirectCost))],
+          ['Subtotal (sin IVA)', fmtMoney(safeNum(priceNoTax))],
+          ['IVA (12%)', fmtMoney(safeNum(tax))],
+          ['Precio Final', fmtMoney(safeNum(finalPrice))],
+        ],
+        styles: { fontSize: 10, cellPadding: 6 },
+        headStyles: { fillColor: [243, 244, 246], textColor: [17, 24, 39] },
+        columnStyles: { 0: { cellWidth: 190 }, 1: { cellWidth: 140, halign: 'right' } },
+        margin: { left: 40, right: 40 },
+      });
+
+      const afterSummaryY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 18 : cursorY + 140;
+
+      // Composition table (report pages)
+      doc.setTextColor(17, 24, 39);
+      doc.setFontSize(11);
+      doc.text('Composición del Costo Directo', 40, afterSummaryY);
+
+      autoTable(doc, {
+        startY: afterSummaryY + 10,
+        theme: 'grid',
+        head: [['Componente', 'Monto', '% CD']],
+        body: [
+          ['Materiales', fmtMoney(costParts.materials), fmtPct(pct(costParts.materials))],
+          ['Mano de obra', fmtMoney(costParts.labor), fmtPct(pct(costParts.labor))],
+          ['Equipo', fmtMoney(costParts.equipment), fmtPct(pct(costParts.equipment))],
+          ['Total', fmtMoney(cdDenom), '100.0%'],
+        ],
+        styles: { fontSize: 10, cellPadding: 6 },
+        headStyles: { fillColor: [243, 244, 246], textColor: [17, 24, 39] },
+        columnStyles: {
+          0: { cellWidth: 190 },
+          1: { cellWidth: 140, halign: 'right' },
+          2: { cellWidth: 70, halign: 'right' },
+        },
+        margin: { left: 40, right: 40 },
+      });
+
+      const afterCompositionY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 18 : afterSummaryY + 120;
+
+      // Chapters summary
+      doc.setTextColor(17, 24, 39);
+      doc.setFontSize(11);
+      doc.text('Resumen por capítulos', 40, afterCompositionY);
+
+      const chapterAgg = new Map<string, { subtotal: number; lines: number }>();
+      budgetLines.forEach((line) => {
+        const chapterLabel = getChapterBucketLabel(getChapterNumber(String(line.name || '')));
+        const subtotal = safeNum(line.directCost);
+        const prev = chapterAgg.get(chapterLabel) || { subtotal: 0, lines: 0 };
+        chapterAgg.set(chapterLabel, { subtotal: prev.subtotal + subtotal, lines: prev.lines + 1 });
+      });
+
+      const chapterRows = [...chapterAgg.entries()]
+        .map(([label, v]) => ({ label, ...v }))
+        .sort((a, b) => b.subtotal - a.subtotal)
+        .map((r) => [r.label, String(r.lines), fmtMoney(r.subtotal), fmtPct(pct(r.subtotal))]);
+
+      autoTable(doc, {
+        startY: afterCompositionY + 10,
+        theme: 'striped',
+        head: [['Capítulo', '# renglones', 'Subtotal', '% CD']],
+        body: chapterRows,
+        styles: { fontSize: 9, cellPadding: 5, overflow: 'linebreak' },
+        headStyles: { fillColor: [17, 24, 39], textColor: [255, 255, 255] },
+        columnStyles: {
+          0: { cellWidth: 220 },
+          1: { cellWidth: 70, halign: 'right' },
+          2: { cellWidth: 110, halign: 'right', fontStyle: 'bold' },
+          3: { cellWidth: 70, halign: 'right' },
+        },
+        margin: { left: 40, right: 40 },
+      });
+
+      const afterChaptersY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 18 : afterCompositionY + 150;
+
+      // Top 10
+      doc.setTextColor(17, 24, 39);
+      doc.setFontSize(11);
+      doc.text('Top 10 renglones por costo directo', 40, afterChaptersY);
+
+      const top = [...budgetLines]
+        .map((line) => {
+          const qty = safeNum(line.quantity);
+          const matUnit = calcLineUnitMaterials(line);
+          const unitDirectCost = matUnit + safeNum(line.laborCost) + safeNum(line.equipmentCost);
+          const fallbackSubtotal = unitDirectCost * qty;
+          const subtotal = safeNum(line.directCost) > 0 ? safeNum(line.directCost) : fallbackSubtotal;
+          const chapterNumber = getChapterNumber(String(line.name || ''));
+          return {
+            cap: chapterNumber ? String(chapterNumber) : '',
+            name: String(line.name || ''),
+            unit: String(line.unit || ''),
+            qty,
+            unitDirectCost,
+            subtotal,
+          };
+        })
+        .sort((a, b) => b.subtotal - a.subtotal)
+        .slice(0, 10);
+
+      const topRows = top.map((t, idx) => [
+        String(idx + 1),
+        String(t.cap || '-'),
+        t.name,
+        t.unit,
+        t.qty.toFixed(2),
+        fmtMoney(t.unitDirectCost),
+        fmtMoney(t.subtotal),
+        fmtPct(pct(t.subtotal)),
+      ]);
+
+      autoTable(doc, {
+        startY: afterChaptersY + 10,
+        theme: 'striped',
+        head: [['#', 'Cap.', 'Renglón', 'Unidad', 'Cantidad', 'CD Unit.', 'Subtotal', '% CD']],
+        body: topRows,
+        styles: { fontSize: 8.5, cellPadding: 5, overflow: 'linebreak' },
+        headStyles: { fillColor: [17, 24, 39], textColor: [255, 255, 255] },
+        columnStyles: {
+          0: { cellWidth: 22, halign: 'right' },
+          1: { cellWidth: 30, halign: 'right' },
+          2: { cellWidth: 200 },
+          3: { cellWidth: 52 },
+          4: { cellWidth: 58, halign: 'right' },
+          5: { cellWidth: 68, halign: 'right' },
+          6: { cellWidth: 68, halign: 'right', fontStyle: 'bold' },
+          7: { cellWidth: 50, halign: 'right' },
+        },
+        margin: { left: 40, right: 40 },
+      });
+
+      // Lines table
+      const afterTopY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 18 : afterChaptersY + 170;
+
+      const rows = budgetLines.map((line, idx) => {
+        const matCost = (line.materials || []).reduce((sum, m) => sum + safeNum(m.quantityPerUnit) * safeNum(m.unitPrice), 0);
+        const unitDirectCost = matCost + safeNum(line.laborCost) + safeNum(line.equipmentCost);
+        return [
+          String(idx + 1),
+          String(line.name || ''),
+          String(line.unit || ''),
+          safeNum(line.quantity).toFixed(2),
+          fmtMoney(unitDirectCost),
+          fmtMoney(safeNum(line.directCost)),
+        ];
+      });
+
+      autoTable(doc, {
+        startY: afterTopY,
+        theme: 'striped',
+        head: [['#', 'Renglón', 'Unidad', 'Cantidad', 'CD Unit.', 'Subtotal']],
+        body: rows,
+        styles: { fontSize: 9, cellPadding: 5, overflow: 'linebreak' },
+        headStyles: { fillColor: [17, 24, 39], textColor: [255, 255, 255] },
+        columnStyles: {
+          0: { cellWidth: 24, halign: 'right' },
+          1: { cellWidth: 210 },
+          2: { cellWidth: 56 },
+          3: { cellWidth: 64, halign: 'right' },
+          4: { cellWidth: 76, halign: 'right' },
+          5: { cellWidth: 76, halign: 'right', fontStyle: 'bold' },
+        },
+        margin: { left: 40, right: 40 },
+        foot: [[{ content: 'COSTO DIRECTO TOTAL', colSpan: 5, styles: { halign: 'right', fontStyle: 'bold' } }, { content: fmtMoney(safeNum(totalDirectCost)), styles: { halign: 'right', fontStyle: 'bold' } }]],
+      });
+
+      const fileName = `Reporte-Ejecutivo-${sanitizeFileName(project.name)}-${now.toISOString().slice(0, 10)}.pdf`;
+      const blobUrl = doc.output('bloburl');
+      const opened = window.open(blobUrl, '_blank', 'noopener,noreferrer');
+      if (!opened) {
+        doc.save(fileName);
+      }
+
+      setImportStatus({ type: 'success', message: 'PDF ejecutivo generado (se abrió en una nueva pestaña o se descargó).' });
+    } catch (e: any) {
+      console.error(e);
+      setImportStatus({ type: 'error', message: e?.message || 'Error generando PDF' });
+    }
+  };
+
+  const handleSyncFactors = async () => {
+    if (!selectedProjectId || !typology) {
+      setImportStatus({ type: 'error', message: 'Seleccione un proyecto para sincronizar.' });
+      return;
+    }
+    if (budgetLines.length === 0) {
+      setImportStatus({ type: 'info', message: 'No hay renglones para sincronizar.' });
+      return;
+    }
+
+    const ok = window.confirm('Esto actualizará mano de obra/equipo/materiales (y precios) desde el catálogo, manteniendo cantidades. ¿Desea continuar?');
+    if (!ok) return;
+
+    setImportStatus({ type: 'info', message: 'Sincronizando factores...' });
+    let updatedCount = 0;
+    let usedCloud = 0;
+
+    const updated = await Promise.all(
+      budgetLines.map(async (line) => {
+        let suggestion: Partial<BudgetLine> | null = null;
+        if (onSuggestLineFromCatalog) {
+          try {
+            suggestion = await onSuggestLineFromCatalog(String(typology), line.name);
+            if (suggestion) usedCloud++;
+          } catch {
+            // ignore cloud errors per-line; we'll fallback
+          }
+        }
+
+        if (!suggestion) {
+          const local = suggestFromCatalog(line.name, typology as Typology);
+          if (local) suggestion = local;
+        }
+
+        if (!suggestion) return line;
+
+        const next: BudgetLine = {
+          ...line,
+          unit: String((suggestion as any).unit ?? line.unit),
+          laborCost: Number((suggestion as any).laborCost ?? line.laborCost ?? 0),
+          equipmentCost: Number((suggestion as any).equipmentCost ?? line.equipmentCost ?? 0),
+          materials: Array.isArray((suggestion as any).materials) ? [...((suggestion as any).materials as any[])] : line.materials,
+        };
+        next.directCost = calculateLineTotal(next);
+        updatedCount++;
+        return next;
+      })
+    );
+
+    setBudgetLines(updated);
+    setImportStatus({
+      type: 'success',
+      message: `Factores sincronizados. Renglones actualizados: ${updatedCount}. ${usedCloud > 0 ? `Fuente: Supabase (${usedCloud}).` : 'Fuente: catálogo interno.'}`
+    });
   };
 
   const toggleExpand = (id: string) => {
@@ -1527,11 +1978,11 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
                   <Save size={18} />
                   <span>Guardar Presupuesto</span>
                 </button>
-                <button className="w-full py-3 bg-navy-900 hover:bg-navy-800 text-white font-bold rounded flex items-center justify-center space-x-2">
+                <button onClick={handlePrintExecutiveReport} className="w-full py-3 bg-navy-900 hover:bg-navy-800 text-white font-bold rounded flex items-center justify-center space-x-2">
                   <Printer size={18} />
                   <span>Imprimir Reporte Ejecutivo (PDF)</span>
                 </button>
-                 <button className="w-full py-3 bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold rounded flex items-center justify-center space-x-2">
+                 <button onClick={handleSyncFactors} className="w-full py-3 bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold rounded flex items-center justify-center space-x-2">
                   <RefreshCw size={18} />
                   <span>Sincronizar Factores</span>
                 </button>

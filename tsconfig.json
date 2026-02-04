@@ -1,6 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2022",
+    "forceConsistentCasingInFileNames": true,
     "experimentalDecorators": true,
     "useDefineForClassFields": false,
     "module": "ESNext",
@@ -25,5 +26,10 @@
     },
     "allowImportingTsExtensions": true,
     "noEmit": true
-  }
+  },
+  "exclude": [
+    "supabase/functions/**",
+    "dist/**",
+    "node_modules/**"
+  ]
 }

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, Wallet, HardHat, FileText, Activity, ShoppingCart, Users, Calculator, LogOut, Menu, X, Lock } from 'lucide-react';
+import { LayoutDashboard, Wallet, HardHat, FileText, Activity, ShoppingCart, Users, Calculator, LogOut, Menu, X, Lock, ShieldCheck } from 'lucide-react';
 import { ViewState, Project, RequisitionData, QuoteInitialData } from './types';
 import { isSupabaseConfigured } from './lib/supabaseClient';
 import {
@@ -12,6 +12,8 @@ import {
   createTransaction as dbCreateTransaction,
   loadBudgetForProject,
   saveBudgetForProject,
+  loadProgressForProject,
+  saveProgressForProject,
   importMaterialPricesFromCsvUrl,
   importMaterialPricesFromCsvText,
   suggestLineFromApuCatalog,
@@ -22,6 +24,10 @@ import {
   listRequisitions,
   listEmployees,
   createEmployee,
+  listEmployeeContracts,
+  upsertEmployeeContract,
+  listAttendanceForDate,
+  setEmployeeAttendanceToken,
 } from './lib/db';
 
 // Components
@@ -34,8 +40,14 @@ import Seguimiento from './components/Seguimiento';
 import Compras from './components/Compras';
 import RRHH from './components/RRHH';
 import Cotizador from './components/Cotizador';
+import SupabaseDiagnostics from './components/SupabaseDiagnostics';
+import ContractIntake from './components/ContractIntake';
+import WorkerAttendance from './components/WorkerAttendance';
 
 const App: React.FC = () => {
+  const appIconUrl = `${import.meta.env.BASE_URL}icon.svg`;
+  const isContractIntakeMode = typeof window !== 'undefined' && String(window.location.hash || '').startsWith('#contract-intake=');
+  const isWorkerAttendanceMode = typeof window !== 'undefined' && String(window.location.hash || '').startsWith('#asistencia=');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentView, setCurrentView] = useState<ViewState>('WELCOME');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -142,6 +154,16 @@ const App: React.FC = () => {
     await saveBudgetForProject(orgId, projectId, typology, indirectPct, lines as any);
   };
 
+  const handleLoadProgress = async (projectId: string) => {
+    if (!isSupabaseConfigured || !orgId) return null;
+    return await loadProgressForProject(orgId, projectId);
+  };
+
+  const handleSaveProgress = async (projectId: string, payload: any) => {
+    if (!isSupabaseConfigured || !orgId) return;
+    await saveProgressForProject(orgId, projectId, payload);
+  };
+
   const handleImportMaterialPrices = async (input: { url: string; vendor: string; currency: string }) => {
     if (!isSupabaseConfigured || !orgId) throw new Error('Supabase no configurado.');
     return await importMaterialPricesFromCsvUrl(orgId, input);
@@ -199,6 +221,27 @@ const App: React.FC = () => {
     return await createEmployee(orgId, input);
   };
 
+  const handleListEmployeeContracts = async () => {
+    if (!isSupabaseConfigured || !orgId) return null;
+    return await listEmployeeContracts(orgId);
+  };
+
+  const handleUpsertEmployeeContract = async (input: any) => {
+    if (!isSupabaseConfigured || !orgId) return null;
+    return await upsertEmployeeContract(orgId, input);
+  };
+
+  const handleListAttendance = async (workDate: string) => {
+    if (!isSupabaseConfigured || !orgId) return null;
+    return await listAttendanceForDate(orgId, workDate);
+  };
+
+  const handleSetAttendanceToken = async (employeeId: string, token: string) => {
+    if (!isSupabaseConfigured || !orgId) return;
+    // orgId is validated inside the RPC by org membership.
+    await setEmployeeAttendanceToken(employeeId, token);
+  };
+
   const handleLogin = () => {
     setIsAuthenticated(true);
     setCurrentView('INICIO'); // Default after login
@@ -239,6 +282,8 @@ const App: React.FC = () => {
   };
 
   if (!isAuthenticated) {
+    if (isContractIntakeMode) return <ContractIntake />;
+    if (isWorkerAttendanceMode) return <WorkerAttendance />;
     return <WelcomeScreen onLogin={handleLogin} />;
   }
 
@@ -268,7 +313,10 @@ const App: React.FC = () => {
       {/* Sidebar Desktop */}
       <aside className="hidden md:flex flex-col w-64 bg-navy-900 text-white shadow-xl">
         <div className="p-6 border-b border-navy-800">
-          <h1 className="text-xl font-bold text-mustard-500">M&S Construcción</h1>
+          <div className="flex items-center gap-3">
+            <img src={appIconUrl} alt="M&S" className="w-8 h-8" />
+            <h1 className="text-xl font-bold text-mustard-500">M&S Construcción</h1>
+          </div>
           <p className="text-xs text-gray-400 mt-1 tracking-widest">EDIFICANDO EL FUTURO</p>
         </div>
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
@@ -280,6 +328,7 @@ const App: React.FC = () => {
           <NavItem view="COMPRAS" icon={ShoppingCart} label="Compras" />
           <NavItem view="RRHH" icon={Users} label="Recursos Humanos" />
           <NavItem view="COTIZADOR" icon={Calculator} label="Cotizador Rápido" />
+          <NavItem view="DIAGNOSTICO" icon={ShieldCheck} label="Diagnóstico" />
         </nav>
         <div className="p-4 border-t border-navy-800">
           <button onClick={handleLogout} className="flex items-center space-x-2 text-red-400 hover:text-red-300 w-full p-2">
@@ -292,7 +341,10 @@ const App: React.FC = () => {
       {/* Mobile Header */}
       <div className="md:hidden fixed top-0 w-full bg-navy-900 text-white z-50 flex items-center justify-between p-4 shadow-md">
         <div>
-          <h1 className="font-bold text-mustard-500">M&S</h1>
+          <div className="flex items-center gap-2">
+            <img src={appIconUrl} alt="M&S" className="w-6 h-6" />
+            <h1 className="font-bold text-mustard-500">M&S</h1>
+          </div>
         </div>
         <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
           {isMobileMenuOpen ? <X /> : <Menu />}
@@ -311,6 +363,7 @@ const App: React.FC = () => {
             <NavItem view="COMPRAS" icon={ShoppingCart} label="Compras" />
             <NavItem view="RRHH" icon={Users} label="Recursos Humanos" />
             <NavItem view="COTIZADOR" icon={Calculator} label="Cotizador" />
+              <NavItem view="DIAGNOSTICO" icon={ShieldCheck} label="Diagnóstico" />
             <button onClick={handleLogout} className="flex items-center space-x-3 w-full p-3 text-red-400 mt-4">
               <LogOut size={20} />
               <span>Salir</span>
@@ -343,6 +396,7 @@ const App: React.FC = () => {
                   {currentView === 'COMPRAS' && 'Logística y Proveedores'}
                   {currentView === 'RRHH' && 'Personal y Planillas'}
                   {currentView === 'COTIZADOR' && 'Cotización de Servicios'}
+                  {currentView === 'DIAGNOSTICO' && 'Diagnóstico (Supabase)'}
                 </h2>
              </div>
              <div className="text-right hidden sm:block">
@@ -386,22 +440,41 @@ const App: React.FC = () => {
                 onImportApuTemplatesCsvText={handleImportApuTemplatesCsvText}
               />
             )}
-            {currentView === 'SEGUIMIENTO' && <Seguimiento projects={projects} />}
+            {currentView === 'SEGUIMIENTO' && (
+              <Seguimiento
+                projects={projects}
+                onLoadBudget={handleLoadBudget}
+                onLoadProgress={handleLoadProgress}
+                onSaveProgress={handleSaveProgress}
+              />
+            )}
             {currentView === 'COMPRAS' && (
               <Compras 
                 projects={projects} 
                 initialData={requisitionData}
+                onLoadBudget={handleLoadBudget}
                 onCreateRequisition={handleCreateRequisition}
                 onListRequisitions={handleListRequisitions}
               />
             )}
             {currentView === 'RRHH' && (
-              <RRHH projects={projects} onListEmployees={handleListEmployees} onCreateEmployee={handleCreateEmployee} />
+              <RRHH
+                projects={projects}
+                onListEmployees={handleListEmployees}
+                onCreateEmployee={handleCreateEmployee}
+                onListContracts={handleListEmployeeContracts}
+                onUpsertContract={handleUpsertEmployeeContract}
+                onListAttendance={handleListAttendance}
+                onSetAttendanceToken={handleSetAttendanceToken}
+              />
             )}
             {currentView === 'COTIZADOR' && (
               <Cotizador 
                 initialData={quoteInitialData} 
               />
+            )}
+            {currentView === 'DIAGNOSTICO' && (
+              <SupabaseDiagnostics orgId={orgId} enabled={isSupabaseConfigured} />
             )}
           </div>
         </div>

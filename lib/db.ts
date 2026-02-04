@@ -401,6 +401,111 @@ export async function saveBudgetForProject(
 }
 
 // -----------------------------------------------------------------------------
+// Seguimiento (Avance físico por renglón)
+// Model: 1 avance editable por proyecto, con líneas identificadas por nombre.
+// NOTE: Budget lines are re-inserted on save (IDs can change), so we persist by
+//       line_name and merge in the UI by normalized name.
+// -----------------------------------------------------------------------------
+
+export type ProjectProgressLine = {
+  name: string;
+  unit: string;
+  plannedQty: number;
+  completedQty: number;
+  notes?: string;
+};
+
+export type ProjectProgressPayload = {
+  projectId: string;
+  updatedAt?: string;
+  lines: ProjectProgressLine[];
+};
+
+export async function loadProgressForProject(orgId: string, projectId: string): Promise<ProjectProgressPayload | null> {
+  const supabase = getSupabaseClient();
+
+  const header = await supabase
+    .from('project_progress')
+    .select('id, updated_at')
+    .eq('org_id', orgId)
+    .eq('project_id', projectId)
+    .maybeSingle();
+
+  if (header.error) throw header.error;
+  if (!header.data) return null;
+
+  const progressId = header.data.id as string;
+
+  const linesRes = await supabase
+    .from('project_progress_lines')
+    .select('*')
+    .eq('org_id', orgId)
+    .eq('progress_id', progressId)
+    .order('sort_order', { ascending: true });
+
+  if (linesRes.error) throw linesRes.error;
+
+  const lines: ProjectProgressLine[] = (linesRes.data ?? []).map((r: any) => ({
+    name: r.line_name,
+    unit: r.line_unit,
+    plannedQty: Number(r.planned_qty),
+    completedQty: Number(r.completed_qty),
+    notes: r.notes ?? undefined,
+  }));
+
+  return {
+    projectId,
+    updatedAt: header.data.updated_at ? String(header.data.updated_at) : undefined,
+    lines,
+  };
+}
+
+export async function saveProgressForProject(orgId: string, projectId: string, payload: ProjectProgressPayload): Promise<void> {
+  const supabase = getSupabaseClient();
+
+  const upsert = await supabase
+    .from('project_progress')
+    .upsert(
+      {
+        org_id: orgId,
+        project_id: projectId,
+      },
+      { onConflict: 'project_id' }
+    )
+    .select('id')
+    .single();
+
+  if (upsert.error) throw upsert.error;
+  const progressId = upsert.data.id as string;
+
+  const delLines = await supabase
+    .from('project_progress_lines')
+    .delete()
+    .eq('org_id', orgId)
+    .eq('progress_id', progressId);
+
+  if (delLines.error) throw delLines.error;
+
+  const linePayload = (payload.lines ?? []).map((l, idx) => ({
+    org_id: orgId,
+    progress_id: progressId,
+    line_name: l.name,
+    line_unit: l.unit,
+    planned_qty: Number(l.plannedQty) || 0,
+    completed_qty: Number(l.completedQty) || 0,
+    notes: l.notes ?? null,
+    sort_order: idx,
+  }));
+
+  if (linePayload.length > 0) {
+    const ins = await supabase
+      .from('project_progress_lines')
+      .insert(linePayload);
+    if (ins.error) throw ins.error;
+  }
+}
+
+// -----------------------------------------------------------------------------
 // Catalog: material prices + APU templates (web-import friendly)
 // -----------------------------------------------------------------------------
 
@@ -960,6 +1065,149 @@ export async function createEmployee(orgId: string, input: { name: string; dpi?:
     .select('*')
     .single();
 
+  if (res.error) throw res.error;
+  return res.data;
+}
+
+// -----------------------------------------------------------------------------
+// Employee Contracts (RRHH digital contracts)
+// -----------------------------------------------------------------------------
+
+export async function listEmployeeContracts(orgId: string, limit = 30): Promise<any[]> {
+  const supabase = getSupabaseClient();
+  const res = await supabase
+    .from('employee_contracts')
+    .select('*')
+    .eq('org_id', orgId)
+    .order('requested_at', { ascending: false })
+    .limit(limit);
+
+  if (res.error) throw res.error;
+  return res.data ?? [];
+}
+
+export async function upsertEmployeeContract(
+  orgId: string,
+  input: {
+    requestId: string;
+    status: 'sent' | 'received' | 'void';
+    seed: any;
+    response?: any | null;
+    employeeId?: string | null;
+    projectId?: string | null;
+    requestedAt?: string;
+    respondedAt?: string | null;
+  }
+): Promise<any> {
+  const supabase = getSupabaseClient();
+
+  const seed = input.seed ?? {};
+  const requestedAt = input.requestedAt ?? seed.requestedAt ?? new Date().toISOString();
+  const respondedAt = input.respondedAt ?? (input.status === 'received' ? new Date().toISOString() : null);
+
+  const employeeName = String(seed.employeeName ?? '').trim();
+  const role = String(seed.role ?? '').trim();
+
+  const res = await supabase
+    .from('employee_contracts')
+    .upsert(
+      {
+        org_id: orgId,
+        request_id: input.requestId,
+        status: input.status,
+
+        employee_id: input.employeeId ?? seed.employeeId ?? null,
+        project_id: input.projectId ?? seed.projectId ?? null,
+
+        employee_name: employeeName || 'Empleado',
+        employee_phone: seed.employeePhone ? String(seed.employeePhone) : null,
+        role: role || 'Puesto',
+        daily_rate: typeof seed.dailyRate === 'number' ? seed.dailyRate : Number(seed.dailyRate ?? 0),
+
+        seed,
+        response: input.response ?? null,
+
+        requested_at: requestedAt,
+        responded_at: respondedAt,
+      },
+      { onConflict: 'org_id,request_id' }
+    )
+    .select('*')
+    .single();
+
+  if (res.error) throw res.error;
+  return res.data;
+}
+
+// -----------------------------------------------------------------------------
+// Attendance (GPS + biometric payload)
+// -----------------------------------------------------------------------------
+
+export async function setEmployeeAttendanceToken(employeeId: string, token: string): Promise<void> {
+  const supabase = getSupabaseClient();
+  const res = await supabase.rpc('set_employee_attendance_token', {
+    p_employee_id: employeeId,
+    p_token: token,
+  });
+  if (res.error) throw res.error;
+}
+
+export async function submitAttendanceWithToken(input: {
+  token: string;
+  action: 'check_in' | 'check_out';
+  workDate?: string; // yyyy-mm-dd
+  lat: number;
+  lng: number;
+  accuracyM?: number | null;
+  biometric?: any | null;
+  device?: any | null;
+}): Promise<any> {
+  const supabase = getSupabaseClient();
+  const res = await supabase.rpc('submit_attendance_with_token', {
+    p_token: input.token,
+    p_action: input.action,
+    p_work_date: input.workDate ?? null,
+    p_lat: input.lat,
+    p_lng: input.lng,
+    p_accuracy_m: input.accuracyM ?? null,
+    p_biometric: input.biometric ?? null,
+    p_device: input.device ?? null,
+  });
+  if (res.error) throw res.error;
+  return res.data;
+}
+
+export async function listAttendanceForDate(orgId: string, workDate: string): Promise<any[]> {
+  const supabase = getSupabaseClient();
+  const res = await supabase
+    .from('v_attendance_daily')
+    .select('*')
+    .eq('org_id', orgId)
+    .eq('work_date', workDate)
+    .order('check_in', { ascending: false });
+
+  if (res.error) throw res.error;
+  return res.data ?? [];
+}
+
+export async function getAttendanceTokenInfo(token: string): Promise<{ orgId: string; employeeId: string; employeeName: string } | null> {
+  const supabase = getSupabaseClient();
+  const res = await supabase.rpc('get_attendance_token_info', { p_token: token });
+  if (res.error) throw res.error;
+  const row = Array.isArray(res.data) ? res.data[0] : res.data;
+  if (!row?.org_id || !row?.employee_id) return null;
+  return {
+    orgId: String(row.org_id),
+    employeeId: String(row.employee_id),
+    employeeName: String(row.employee_name ?? row.name ?? ''),
+  };
+}
+
+export async function webauthnInvoke(action: string, body: any): Promise<any> {
+  const supabase = getSupabaseClient();
+  const res = await supabase.functions.invoke('webauthn', {
+    body: { action, ...body },
+  });
   if (res.error) throw res.error;
   return res.data;
 }

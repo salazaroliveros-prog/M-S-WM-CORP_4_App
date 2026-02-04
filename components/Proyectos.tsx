@@ -170,6 +170,120 @@ const Proyectos: React.FC<Props> = ({ projects, onCreateProject, onUpdateProject
     });
   };
 
+  const escapeHtml = (value: string) => {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  };
+
+  const printFichaPdf = (project: Project) => {
+    const now = new Date();
+    const statusLabel = project.status === 'active' ? 'ACTIVO' : project.status === 'completed' ? 'COMPLETADO' : 'EN ESPERA';
+
+    const html = `
+      <!doctype html>
+      <html lang="es">
+        <head>
+          <meta charset="utf-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          <title>Ficha Técnica - ${escapeHtml(project.name)}</title>
+          <style>
+            body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; color: #111827; margin: 24px; }
+            .header { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; border-bottom: 2px solid #0f172a; padding-bottom: 12px; margin-bottom: 16px; }
+            .brand { font-weight: 800; font-size: 18px; color: #0f172a; }
+            .subtitle { font-size: 12px; color:#374151; margin-top:4px; }
+            .meta { font-size: 12px; color:#374151; text-align:right; }
+            .title { font-weight: 800; font-size: 18px; margin: 0 0 8px; }
+            .pill { display:inline-block; padding:4px 10px; border-radius:999px; font-size: 11px; font-weight: 800; background:#f3f4f6; color:#111827; border:1px solid #e5e7eb; }
+            .grid { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 12px 0 18px; }
+            .card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; }
+            .card h3 { margin: 0 0 8px; font-size: 13px; color: #0f172a; }
+            .row { display:flex; justify-content:space-between; gap: 12px; font-size: 12px; padding: 4px 0; border-bottom: 1px dashed #e5e7eb; }
+            .row:last-child { border-bottom: none; }
+            .muted { color:#6b7280; }
+            .notes { white-space: pre-wrap; font-size: 12px; line-height: 1.35; }
+            a { color: #1d4ed8; text-decoration: none; }
+            a:hover { text-decoration: underline; }
+            @media print {
+              body { margin: 0.5in; }
+              .card { break-inside: avoid; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div>
+              <div class="brand">M&S Construcción</div>
+              <div class="subtitle">Gestión de Proyectos · Ficha Técnica</div>
+            </div>
+            <div class="meta">
+              <div><strong>Ficha Técnica</strong></div>
+              <div class="muted">${now.toLocaleDateString('es-GT')} ${now.toLocaleTimeString('es-GT')}</div>
+            </div>
+          </div>
+
+          <h1 class="title">${escapeHtml(project.name)}</h1>
+          <div class="pill">${escapeHtml(project.typology)} · ${escapeHtml(statusLabel)}</div>
+
+          <div class="grid">
+            <div class="card">
+              <h3>Datos Generales</h3>
+              <div class="row"><span class="muted">Cliente</span><span>${escapeHtml(project.clientName)}</span></div>
+              <div class="row"><span class="muted">Encargado</span><span>${escapeHtml(project.projectManager || '-')}</span></div>
+              <div class="row"><span class="muted">Inicio</span><span>${escapeHtml(new Date(project.startDate).toLocaleDateString('es-GT'))}</span></div>
+            </div>
+            <div class="card">
+              <h3>Metraje</h3>
+              <div class="row"><span class="muted">Área Terreno</span><span>${escapeHtml(String(project.areaLand))} m²</span></div>
+              <div class="row"><span class="muted">Área Construcción</span><span>${escapeHtml(String(project.areaBuild))} m²</span></div>
+            </div>
+            <div class="card" style="grid-column: 1 / -1;">
+              <h3>Ubicación</h3>
+              <div class="row"><span class="muted">Dirección</span><span>${escapeHtml(project.location)}</span></div>
+              <div class="row"><span class="muted">Lote / Bloque</span><span>${escapeHtml(`${project.lot || '-'} / ${project.block || '-'}`)}</span></div>
+              <div class="row"><span class="muted">Coordenadas</span><span>${project.coordinates ? `<a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(project.coordinates)}" target="_blank" rel="noopener noreferrer">${escapeHtml(project.coordinates)}</a>` : '-'}</span></div>
+            </div>
+            <div class="card" style="grid-column: 1 / -1;">
+              <h3>Programa de Necesidades</h3>
+              <div class="notes">${escapeHtml(project.needs || '—')}</div>
+            </div>
+          </div>
+
+          <div style="margin-top:12px; font-size:11px; color:#6b7280;">
+            Sugerencia: use “Guardar como PDF” desde el diálogo de impresión.
+          </div>
+        </body>
+      </html>
+    `;
+
+    const w = window.open('', '_blank', 'noopener,noreferrer');
+    if (!w) {
+      alert('No se pudo abrir la ventana de impresión (popup bloqueado).');
+      return;
+    }
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+    try {
+      w.focus();
+      setTimeout(() => {
+        try { w.print(); } catch { /* ignore */ }
+      }, 250);
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleViewFichaPdf = (project: Project) => {
+    // Open the printable ficha first (so popup blockers treat it as a user gesture)
+    printFichaPdf(project);
+    // Also open the edit form so the user can update fields
+    openEditProject(project);
+  };
+
   const syncProjects = () => {
     // Simulation of Schema Generation for cloud sync
     const schema = {
@@ -646,6 +760,17 @@ const Proyectos: React.FC<Props> = ({ projects, onCreateProject, onUpdateProject
                 onClick={() => {
                   const p = viewProject;
                   setViewProject(null);
+                  handleViewFichaPdf(p);
+                }}
+                className="px-4 py-2 bg-navy-900 hover:bg-navy-800 text-white rounded font-bold"
+                title="Ver ficha en PDF y editar"
+              >
+                Ver PDF
+              </button>
+              <button
+                onClick={() => {
+                  const p = viewProject;
+                  setViewProject(null);
                   openEditProject(p);
                 }}
                 className="px-4 py-2 bg-mustard-500 hover:bg-mustard-600 text-navy-900 rounded font-bold"
@@ -790,6 +915,13 @@ const Proyectos: React.FC<Props> = ({ projects, onCreateProject, onUpdateProject
                   title="Ver ficha"
                 >
                   Ver Ficha
+                </button>
+                <button
+                  onClick={() => handleViewFichaPdf(project)}
+                  className="px-3 text-center py-2 bg-navy-900 text-white rounded text-sm hover:bg-navy-800 transition-colors"
+                  title="Ver ficha en PDF y editar"
+                >
+                  PDF
                 </button>
                 <button 
                   onClick={() => onQuoteProject(project)}
