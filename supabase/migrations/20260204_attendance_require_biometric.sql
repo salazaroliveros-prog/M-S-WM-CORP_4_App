@@ -3,12 +3,13 @@
 
 begin;
 
+drop function if exists app.submit_attendance_with_token(text, text, date, numeric, numeric, numeric, jsonb, jsonb);
 create or replace function app.submit_attendance_with_token(
   p_token text,
   p_action text,
-  p_work_date date default current_date,
   p_lat numeric,
   p_lng numeric,
+  p_work_date date default current_date,
   p_accuracy_m numeric default null,
   p_biometric jsonb default null,
   p_device jsonb default null
@@ -65,7 +66,7 @@ begin
     raise exception 'Método biométrico inválido';
   end if;
 
-  v_hash := encode(digest(p_token, 'sha256'), 'hex');
+  v_hash := encode(extensions.digest(p_token, 'sha256'), 'hex');
 
   select t.org_id, t.employee_id into v_org_id, v_employee_id
   from public.employee_attendance_tokens t
@@ -131,7 +132,7 @@ begin
 end;
 $$;
 
-revoke all on function app.submit_attendance_with_token(text, text, date, numeric, numeric, numeric, jsonb, jsonb) from public;
-grant execute on function app.submit_attendance_with_token(text, text, date, numeric, numeric, numeric, jsonb, jsonb) to anon, authenticated;
+revoke all on function app.submit_attendance_with_token(text, text, numeric, numeric, date, numeric, jsonb, jsonb) from public;
+grant execute on function app.submit_attendance_with_token(text, text, numeric, numeric, date, numeric, jsonb, jsonb) to anon, authenticated;
 
 commit;

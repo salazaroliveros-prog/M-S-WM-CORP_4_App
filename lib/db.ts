@@ -115,10 +115,20 @@ function fromDbProject(row: any): Project {
   };
 }
 
+function defaultOrgName(): string {
+  const metaEnv = (import.meta as any).env as Record<string, any> | undefined;
+  const env = metaEnv ?? (process.env as Record<string, any> | undefined) ?? {};
+  const name =
+    (env.VITE_ORG_NAME as string | undefined) ??
+    (env.SUPABASE_TEST_ORG_NAME as string | undefined) ??
+    (env.SUPABASE_ORG_NAME as string | undefined);
+  return name && String(name).trim() ? String(name).trim() : 'M&S Construcción';
+}
+
 export async function ensureSupabaseSession(): Promise<void> {
   const supabase = getSupabaseClient();
   const { data } = await supabase.auth.getSession();
-  if (data.session) return;
+  if (data.session?.access_token) return;
 
   // Prefer anonymous sign-in for simple kiosk/admin-password UI.
   const anon = await supabase.auth.signInAnonymously();
@@ -127,9 +137,35 @@ export async function ensureSupabaseSession(): Promise<void> {
       `No se pudo iniciar sesión en Supabase. Habilite Anonymous Sign-ins en Auth o implemente login por email. Detalle: ${anon.error.message}`
     );
   }
+
+  const session = anon.data?.session;
+  if (session?.access_token && session.refresh_token) {
+    // Force the client to adopt the new session immediately.
+    // This avoids a race where subsequent PostgREST requests are still treated as anon.
+    const setRes = await supabase.auth.setSession({
+      access_token: session.access_token,
+      refresh_token: session.refresh_token,
+    });
+    if (setRes.error) throw setRes.error;
+  }
+
+  // Wait briefly for the auth state to be fully usable by downstream queries.
+  const deadline = Date.now() + 2500;
+  let lastSession: any = null;
+  while (Date.now() < deadline) {
+    const verify = await supabase.auth.getSession();
+    lastSession = verify.data.session;
+    if (lastSession?.access_token) {
+      const userRes = await supabase.auth.getUser();
+      if (userRes.data.user?.id) return;
+    }
+    await new Promise((r) => setTimeout(r, 150));
+  }
+
+  throw new Error('No se pudo establecer sesión de Supabase (token no disponible).');
 }
 
-export async function getOrCreateOrgId(orgName = 'M&S Construcción'): Promise<string> {
+export async function getOrCreateOrgId(orgName = defaultOrgName()): Promise<string> {
   const supabase = getSupabaseClient();
 
   const memberships = await supabase
@@ -140,12 +176,45 @@ export async function getOrCreateOrgId(orgName = 'M&S Construcción'): Promise<s
   if (memberships.error) throw memberships.error;
   if (memberships.data && memberships.data.length > 0) return memberships.data[0].org_id as string;
 
-  // Create org (trigger will insert org_members(owner) for the creator)
-  const created = await supabase
-    .from('organizations')
-    .insert({ name: orgName })
-    .select('id')
-    .single();
+  let sess = await supabase.auth.getSession();
+  if (!sess.data.session) {
+    await ensureSupabaseSession();
+    sess = await supabase.auth.getSession();
+  }
+  const userId = sess.data.session?.user?.id;
+  if (!userId) {
+    throw new Error('No hay sesión activa de Supabase. Inicie sesión (anon/email) antes de crear la organización.');
+  }
+
+  // Create org (created_by default = auth.uid(); trigger will insert org_members(owner) for creator)
+  const tryCreate = async () => {
+    return await supabase
+      .from('organizations')
+      .insert({ name: orgName, created_by: userId })
+      .select('id')
+      .single();
+  };
+
+  let created = await tryCreate();
+  if (created.error) {
+    const msg = String((created.error as any)?.message || created.error);
+    const isRls = msg.toLowerCase().includes('row-level security') && msg.toLowerCase().includes('organizations');
+    if (isRls) {
+      // This almost always means the request reached PostgREST without a valid JWT.
+      // Clear any stale client auth state, establish a fresh session, then retry.
+      try {
+        await supabase.auth.signOut();
+      } catch {}
+
+      await ensureSupabaseSession();
+
+      for (const delayMs of [150, 350, 700]) {
+        await new Promise((r) => setTimeout(r, delayMs));
+        created = await tryCreate();
+        if (!created.error) break;
+      }
+    }
+  }
 
   if (created.error) throw created.error;
   return created.data.id as string;
@@ -1163,16 +1232,19 @@ export async function submitAttendanceWithToken(input: {
   device?: any | null;
 }): Promise<any> {
   const supabase = getSupabaseClient();
-  const res = await supabase.rpc('submit_attendance_with_token', {
+  const args: Record<string, any> = {
     p_token: input.token,
     p_action: input.action,
-    p_work_date: input.workDate ?? null,
     p_lat: input.lat,
     p_lng: input.lng,
     p_accuracy_m: input.accuracyM ?? null,
     p_biometric: input.biometric ?? null,
     p_device: input.device ?? null,
-  });
+  };
+  if (typeof input.workDate === 'string' && input.workDate.length > 0) {
+    args.p_work_date = input.workDate;
+  }
+  const res = await supabase.rpc('submit_attendance_with_token', args);
   if (res.error) throw res.error;
   return res.data;
 }

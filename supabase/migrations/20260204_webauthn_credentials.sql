@@ -28,6 +28,7 @@ create table if not exists public.employee_webauthn_credentials (
 
 create index if not exists employee_webauthn_credentials_org_employee_idx on public.employee_webauthn_credentials(org_id, employee_id);
 
+drop trigger if exists employee_webauthn_credentials_set_updated_at on public.employee_webauthn_credentials;
 create trigger employee_webauthn_credentials_set_updated_at
 before update on public.employee_webauthn_credentials
 for each row
@@ -35,6 +36,7 @@ execute function app.tg_set_updated_at();
 
 alter table public.employee_webauthn_credentials enable row level security;
 
+drop policy if exists employee_webauthn_credentials_crud on public.employee_webauthn_credentials;
 create policy employee_webauthn_credentials_crud
 on public.employee_webauthn_credentials
 for all
@@ -74,7 +76,7 @@ begin
     raise exception 'Token inválido';
   end if;
 
-  v_hash := encode(digest(p_token, 'sha256'), 'hex');
+  v_hash := encode(extensions.digest(p_token, 'sha256'), 'hex');
 
   return query
   select t.org_id, t.employee_id, e.name

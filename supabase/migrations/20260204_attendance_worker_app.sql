@@ -24,6 +24,7 @@ create table if not exists public.employee_attendance_tokens (
 
 create index if not exists employee_attendance_tokens_org_hash_idx on public.employee_attendance_tokens(org_id, token_hash);
 
+drop trigger if exists employee_attendance_tokens_set_updated_at on public.employee_attendance_tokens;
 create trigger employee_attendance_tokens_set_updated_at
 before update on public.employee_attendance_tokens
 for each row
@@ -31,6 +32,7 @@ execute function app.tg_set_updated_at();
 
 alter table public.employee_attendance_tokens enable row level security;
 
+drop policy if exists employee_attendance_tokens_crud on public.employee_attendance_tokens;
 create policy employee_attendance_tokens_crud
 on public.employee_attendance_tokens
 for all
@@ -72,7 +74,7 @@ begin
     raise exception 'No autorizado';
   end if;
 
-  v_hash := encode(digest(p_token, 'sha256'), 'hex');
+  v_hash := encode(extensions.digest(p_token, 'sha256'), 'hex');
 
   insert into public.employee_attendance_tokens (org_id, employee_id, token_hash, is_active)
   values (v_org_id, p_employee_id, v_hash, true)
@@ -85,12 +87,13 @@ revoke all on function app.set_employee_attendance_token(uuid, text) from public
 grant execute on function app.set_employee_attendance_token(uuid, text) to authenticated;
 
 -- Public check-in/out (token-gated). Intended for worker device (no org membership).
+drop function if exists app.submit_attendance_with_token(text, text, date, numeric, numeric, numeric, jsonb, jsonb);
 create or replace function app.submit_attendance_with_token(
   p_token text,
   p_action text,
-  p_work_date date default current_date,
   p_lat numeric,
   p_lng numeric,
+  p_work_date date default current_date,
   p_accuracy_m numeric default null,
   p_biometric jsonb default null,
   p_device jsonb default null
@@ -117,7 +120,7 @@ begin
     raise exception 'Ubicación requerida';
   end if;
 
-  v_hash := encode(digest(p_token, 'sha256'), 'hex');
+  v_hash := encode(extensions.digest(p_token, 'sha256'), 'hex');
 
   select t.org_id, t.employee_id into v_org_id, v_employee_id
   from public.employee_attendance_tokens t
@@ -184,8 +187,8 @@ begin
 end;
 $$;
 
-revoke all on function app.submit_attendance_with_token(text, text, date, numeric, numeric, numeric, jsonb, jsonb) from public;
-grant execute on function app.submit_attendance_with_token(text, text, date, numeric, numeric, numeric, jsonb, jsonb) to anon, authenticated;
+revoke all on function app.submit_attendance_with_token(text, text, numeric, numeric, date, numeric, jsonb, jsonb) from public;
+grant execute on function app.submit_attendance_with_token(text, text, numeric, numeric, date, numeric, jsonb, jsonb) to anon, authenticated;
 
 -- Helpful view for admin map/list
 create or replace view public.v_attendance_daily as

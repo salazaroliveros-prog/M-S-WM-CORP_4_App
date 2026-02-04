@@ -72,6 +72,7 @@ create table if not exists public.organizations (
   updated_at timestamptz not null default now()
 );
 
+drop trigger if exists organizations_set_updated_at on public.organizations;
 create trigger organizations_set_updated_at
 before update on public.organizations
 for each row
@@ -178,6 +179,7 @@ create index if not exists projects_org_status_idx on public.projects(org_id, st
 create index if not exists projects_org_name_idx on public.projects(org_id, lower(name));
 create index if not exists projects_org_client_idx on public.projects(org_id, lower(client_name));
 
+drop trigger if exists projects_set_updated_at on public.projects;
 create trigger projects_set_updated_at
 before update on public.projects
 for each row
@@ -214,6 +216,7 @@ create table if not exists public.transactions (
 create index if not exists transactions_project_date_idx on public.transactions(project_id, occurred_at desc);
 create index if not exists transactions_org_project_idx on public.transactions(org_id, project_id);
 
+drop trigger if exists transactions_set_updated_at on public.transactions;
 create trigger transactions_set_updated_at
 before update on public.transactions
 for each row
@@ -245,6 +248,7 @@ create table if not exists public.budgets (
 
 create index if not exists budgets_org_project_idx on public.budgets(org_id, project_id);
 
+drop trigger if exists budgets_set_updated_at on public.budgets;
 create trigger budgets_set_updated_at
 before update on public.budgets
 for each row
@@ -300,11 +304,13 @@ create table if not exists public.budget_line_materials (
 create index if not exists budget_line_materials_line_id_idx on public.budget_line_materials(budget_line_id);
 create index if not exists budget_line_materials_org_line_idx on public.budget_line_materials(org_id, budget_line_id);
 
+drop trigger if exists budget_lines_set_updated_at on public.budget_lines;
 create trigger budget_lines_set_updated_at
 before update on public.budget_lines
 for each row
 execute function app.tg_set_updated_at();
 
+drop trigger if exists budget_line_materials_set_updated_at on public.budget_line_materials;
 create trigger budget_line_materials_set_updated_at
 before update on public.budget_line_materials
 for each row
@@ -333,6 +339,7 @@ begin
 end;
 $$;
 
+drop trigger if exists budget_lines_recalc_direct_cost on public.budget_lines;
 create trigger budget_lines_recalc_direct_cost
 before insert or update of quantity, labor_cost, equipment_cost on public.budget_lines
 for each row
@@ -358,6 +365,7 @@ begin
 end;
 $$;
 
+drop trigger if exists budget_line_materials_bump_parent on public.budget_line_materials;
 create trigger budget_line_materials_bump_parent
 after insert or update or delete on public.budget_line_materials
 for each row
@@ -403,6 +411,7 @@ create table if not exists public.suppliers (
 
 create index if not exists suppliers_org_name_idx on public.suppliers(org_id, lower(name));
 
+drop trigger if exists suppliers_set_updated_at on public.suppliers;
 create trigger suppliers_set_updated_at
 before update on public.suppliers
 for each row
@@ -440,6 +449,7 @@ create table if not exists public.requisitions (
 create index if not exists requisitions_project_idx on public.requisitions(project_id, requested_at desc);
 create index if not exists requisitions_org_project_idx on public.requisitions(org_id, project_id);
 
+drop trigger if exists requisitions_set_updated_at on public.requisitions;
 create trigger requisitions_set_updated_at
 before update on public.requisitions
 for each row
@@ -465,6 +475,7 @@ create table if not exists public.requisition_items (
 
 create index if not exists requisition_items_req_idx on public.requisition_items(requisition_id);
 
+drop trigger if exists requisition_items_set_updated_at on public.requisition_items;
 create trigger requisition_items_set_updated_at
 before update on public.requisition_items
 for each row
@@ -516,6 +527,7 @@ create table if not exists public.employees (
 create index if not exists employees_org_status_idx on public.employees(org_id, status);
 create index if not exists employees_org_name_idx on public.employees(org_id, lower(name));
 
+drop trigger if exists employees_set_updated_at on public.employees;
 create trigger employees_set_updated_at
 before update on public.employees
 for each row
@@ -546,6 +558,7 @@ create table if not exists public.attendance (
 
 create index if not exists attendance_org_date_idx on public.attendance(org_id, work_date desc);
 
+drop trigger if exists attendance_set_updated_at on public.attendance;
 create trigger attendance_set_updated_at
 before update on public.attendance
 for each row
@@ -569,6 +582,7 @@ create table if not exists public.payroll_periods (
 
 create index if not exists payroll_periods_org_dates_idx on public.payroll_periods(org_id, start_date desc);
 
+drop trigger if exists payroll_periods_set_updated_at on public.payroll_periods;
 create trigger payroll_periods_set_updated_at
 before update on public.payroll_periods
 for each row
@@ -598,6 +612,7 @@ create table if not exists public.payroll_entries (
 
 create index if not exists payroll_entries_org_period_idx on public.payroll_entries(org_id, payroll_period_id);
 
+drop trigger if exists payroll_entries_set_updated_at on public.payroll_entries;
 create trigger payroll_entries_set_updated_at
 before update on public.payroll_entries
 for each row
@@ -631,6 +646,7 @@ create table if not exists public.quotes (
 
 create index if not exists quotes_org_created_idx on public.quotes(org_id, created_at desc);
 
+drop trigger if exists quotes_set_updated_at on public.quotes;
 create trigger quotes_set_updated_at
 before update on public.quotes
 for each row
@@ -664,6 +680,7 @@ create table if not exists public.project_phases (
 
 create index if not exists project_phases_project_idx on public.project_phases(project_id, sort_order);
 
+drop trigger if exists project_phases_set_updated_at on public.project_phases;
 create trigger project_phases_set_updated_at
 before update on public.project_phases
 for each row
@@ -707,18 +724,21 @@ alter table public.quotes enable row level security;
 alter table public.project_phases enable row level security;
 
 -- organizations
+drop policy if exists organizations_select on public.organizations;
 create policy organizations_select
 on public.organizations
 for select
-to authenticated
-using (app.is_org_member(id));
+to anon, authenticated
+using (app.is_org_member(id) or created_by = auth.uid());
 
+drop policy if exists organizations_insert on public.organizations;
 create policy organizations_insert
 on public.organizations
 for insert
-to authenticated
+to anon, authenticated
 with check (created_by = auth.uid());
 
+drop policy if exists organizations_update on public.organizations;
 create policy organizations_update
 on public.organizations
 for update
@@ -726,6 +746,7 @@ to authenticated
 using (app.is_org_admin(id))
 with check (app.is_org_admin(id));
 
+drop policy if exists organizations_delete on public.organizations;
 create policy organizations_delete
 on public.organizations
 for delete
@@ -733,18 +754,31 @@ to authenticated
 using (app.is_org_admin(id));
 
 -- org_members
+drop policy if exists org_members_select on public.org_members;
 create policy org_members_select
 on public.org_members
 for select
-to authenticated
+to anon, authenticated
 using (app.is_org_member(org_id));
 
+drop policy if exists org_members_insert on public.org_members;
 create policy org_members_insert
 on public.org_members
 for insert
-to authenticated
-with check (app.is_org_admin(org_id));
+to anon, authenticated
+with check (
+  app.is_org_admin(org_id)
+  or (
+    user_id = auth.uid()
+    and exists (
+      select 1 from public.organizations o
+      where o.id = org_id
+        and o.created_by = auth.uid()
+    )
+  )
+);
 
+drop policy if exists org_members_update on public.org_members;
 create policy org_members_update
 on public.org_members
 for update
@@ -752,6 +786,7 @@ to authenticated
 using (app.is_org_admin(org_id))
 with check (app.is_org_admin(org_id));
 
+drop policy if exists org_members_delete on public.org_members;
 create policy org_members_delete
 on public.org_members
 for delete
@@ -759,6 +794,7 @@ to authenticated
 using (app.is_org_admin(org_id));
 
 -- Generic org-scoped CRUD (members can CRUD inside their org)
+drop policy if exists projects_crud on public.projects;
 create policy projects_crud
 on public.projects
 for all
@@ -766,6 +802,7 @@ to authenticated
 using (app.is_org_member(org_id))
 with check (app.is_org_member(org_id));
 
+drop policy if exists transactions_crud on public.transactions;
 create policy transactions_crud
 on public.transactions
 for all
@@ -773,6 +810,7 @@ to authenticated
 using (app.is_org_member(org_id))
 with check (app.is_org_member(org_id));
 
+drop policy if exists budgets_crud on public.budgets;
 create policy budgets_crud
 on public.budgets
 for all
@@ -780,6 +818,7 @@ to authenticated
 using (app.is_org_member(org_id))
 with check (app.is_org_member(org_id));
 
+drop policy if exists budget_lines_crud on public.budget_lines;
 create policy budget_lines_crud
 on public.budget_lines
 for all
@@ -787,6 +826,7 @@ to authenticated
 using (app.is_org_member(org_id))
 with check (app.is_org_member(org_id));
 
+drop policy if exists budget_line_materials_crud on public.budget_line_materials;
 create policy budget_line_materials_crud
 on public.budget_line_materials
 for all
@@ -794,6 +834,7 @@ to authenticated
 using (app.is_org_member(org_id))
 with check (app.is_org_member(org_id));
 
+drop policy if exists suppliers_crud on public.suppliers;
 create policy suppliers_crud
 on public.suppliers
 for all
@@ -801,6 +842,7 @@ to authenticated
 using (app.is_org_member(org_id))
 with check (app.is_org_member(org_id));
 
+drop policy if exists requisitions_crud on public.requisitions;
 create policy requisitions_crud
 on public.requisitions
 for all
@@ -808,6 +850,7 @@ to authenticated
 using (app.is_org_member(org_id))
 with check (app.is_org_member(org_id));
 
+drop policy if exists requisition_items_crud on public.requisition_items;
 create policy requisition_items_crud
 on public.requisition_items
 for all
@@ -815,6 +858,7 @@ to authenticated
 using (app.is_org_member(org_id))
 with check (app.is_org_member(org_id));
 
+drop policy if exists employees_crud on public.employees;
 create policy employees_crud
 on public.employees
 for all
@@ -822,6 +866,7 @@ to authenticated
 using (app.is_org_member(org_id))
 with check (app.is_org_member(org_id));
 
+drop policy if exists attendance_crud on public.attendance;
 create policy attendance_crud
 on public.attendance
 for all
@@ -829,6 +874,7 @@ to authenticated
 using (app.is_org_member(org_id))
 with check (app.is_org_member(org_id));
 
+drop policy if exists payroll_periods_crud on public.payroll_periods;
 create policy payroll_periods_crud
 on public.payroll_periods
 for all
@@ -836,6 +882,7 @@ to authenticated
 using (app.is_org_member(org_id))
 with check (app.is_org_member(org_id));
 
+drop policy if exists payroll_entries_crud on public.payroll_entries;
 create policy payroll_entries_crud
 on public.payroll_entries
 for all
@@ -843,6 +890,7 @@ to authenticated
 using (app.is_org_member(org_id))
 with check (app.is_org_member(org_id));
 
+drop policy if exists quotes_crud on public.quotes;
 create policy quotes_crud
 on public.quotes
 for all
@@ -850,6 +898,7 @@ to authenticated
 using (app.is_org_member(org_id))
 with check (app.is_org_member(org_id));
 
+drop policy if exists project_phases_crud on public.project_phases;
 create policy project_phases_crud
 on public.project_phases
 for all
