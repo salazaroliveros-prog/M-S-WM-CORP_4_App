@@ -1,0 +1,4 @@
+typology,name,unit,labor_cost,equipment_cost,materials,meta
+RESIDENCIAL,"Limpieza y chapeo",m2,15,5,"",{"rendimiento_mo":"0.08 jornales/m2"}
+RESIDENCIAL,"Trazo y nivelación",m2,12,3,"Cal|lbs|0.5|0;Madera reglas|pt|0.5|0","{\"rendimiento_material\":\"según diseño\"}"
+COMERCIAL,"Muros perimetrales",m2,90,10,"Block|u|12.5|0","{}"

@@ -1,0 +1,9 @@
+{
+  "name": "M&S Construcción",
+  "description": "Sistema integral de gestión para constructora: Proyectos, Presupuestos, RRHH y Finanzas.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}
