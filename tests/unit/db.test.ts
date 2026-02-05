@@ -27,7 +27,15 @@ describe('lib/db Supabase wiring (unit)', () => {
 
   it('ensureSupabaseSession: does nothing if session exists', async () => {
     mockClient = createSupabaseMock({
-      getSession: () => ({ data: { session: { user: { id: 'u1' } } } }),
+      getSession: () => ({
+        data: {
+          session: {
+            user: { id: 'u1' },
+            access_token: 'access',
+            refresh_token: 'refresh',
+          },
+        },
+      }),
     });
 
     await expect(ensureSupabaseSession()).resolves.toBeUndefined();
@@ -58,6 +66,7 @@ describe('lib/db Supabase wiring (unit)', () => {
         data: { session: { access_token: 'access', refresh_token: 'refresh' } },
       }),
       setSession: () => ({ error: null }),
+      getUser: () => ({ data: { user: { id: 'u1' } }, error: null }),
     });
 
     await expect(ensureSupabaseSession()).resolves.toBeUndefined();

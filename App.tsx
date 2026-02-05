@@ -563,6 +563,8 @@ const App: React.FC = () => {
             {currentView === 'SEGUIMIENTO' && (
               <Seguimiento
                 projects={projects}
+                useCloud={useCloud}
+                orgId={orgId}
                 onLoadBudget={handleLoadBudget}
                 onLoadProgress={handleLoadProgress}
                 onSaveProgress={handleSaveProgress}

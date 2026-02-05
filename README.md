@@ -54,6 +54,21 @@ Este repo está configurado para desplegarse automáticamente a GitHub Pages con
 2) Hacer push a `main`.
 3) El workflow publicará la carpeta `dist/`.
 
+### Supabase en GitHub Pages (config permanente)
+
+En GitHub Pages no existe `.env.local` en runtime; Vite necesita las variables en **build time**.
+
+Este repo ya soporta esto con el workflow `.github/workflows/deploy-pages.yml`.
+Configure estos **Secrets** en GitHub:
+
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY` (solo ANON, nunca Service Role)
+- (Opcional) `VITE_ORG_NAME`
+
+Ruta: **Settings → Secrets and variables → Actions → New repository secret**.
+
+Luego haga push a `main` para re-deploy.
+
 URL esperada:
 
 `https://salazaroliveros-prog.github.io/M-S-WM-CORP_4_App/`
