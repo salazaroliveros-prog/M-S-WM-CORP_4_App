@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Project, BudgetLine, Typology, MaterialItem, RequisitionData } from '../types';
-import { DEFAULT_BUDGET_LINES, calculateAPU } from '../constants';
+import { Project, BudgetLine, Typology, MaterialItem, RequisitionData, RoofType } from '../types';
+import { DEFAULT_BUDGET_LINES, DEFAULT_ROOF_BUDGET_LINES, calculateAPU } from '../constants';
 import { Printer, Save, RefreshCw, Upload, Download, AlertTriangle, CheckCircle, ChevronDown, ChevronUp, ChevronLeft, Plus, Trash2, Calculator, ShoppingCart, ArrowRight, X, List } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -30,9 +30,51 @@ interface Props {
   onImportApuTemplatesJsonText?: (input: { jsonText: string; source?: string; currency?: string; sourceUrl?: string | null }) => Promise<{ templatesUpserted: number }>;
 }
 
+const ROOF_META_PREFIX = '__META_ROOF_TYPE__:';
+
+const ROOF_TYPE_OPTIONS: Array<{ value: RoofType; label: string }> = [
+  { value: 'LOSA_SOLIDA', label: 'Losa sólida' },
+  { value: 'LOSA_PREFABRICADA', label: 'Losa prefabricada' },
+  { value: 'ESTRUCTURA_METALICA', label: 'Estructura metálica' },
+  { value: 'PERGOLA_MADERA', label: 'Pérgola de madera' },
+  { value: 'PERGOLA_METAL', label: 'Pérgola de metal' },
+];
+
+const roofLabel = (t: RoofType | ''): string => {
+  if (!t) return '-';
+  return ROOF_TYPE_OPTIONS.find((x) => x.value === t)?.label ?? String(t);
+};
+
+const isRoofMetaLine = (line: BudgetLine): boolean => String(line?.name ?? '').startsWith(ROOF_META_PREFIX);
+
+const isRoofLine = (line: BudgetLine): boolean => {
+  const n = String(line?.name ?? '').trim().toLowerCase();
+  return n.startsWith('techo:');
+};
+
+const parseRoofTypeFromLines = (lines: BudgetLine[]): RoofType | '' => {
+  const meta = (lines || []).find(isRoofMetaLine);
+  if (!meta) return '';
+  const raw = String(meta.name).slice(ROOF_META_PREFIX.length).trim();
+  return (ROOF_TYPE_OPTIONS.some((x) => x.value === raw) ? (raw as RoofType) : '') as any;
+};
+
+const buildRoofMetaLine = (projectId: string, t: RoofType): BudgetLine => ({
+  id: `${ROOF_META_PREFIX}${t}`,
+  projectId,
+  name: `${ROOF_META_PREFIX}${t}`,
+  unit: 'meta',
+  quantity: 0,
+  directCost: 0,
+  laborCost: 0,
+  equipmentCost: 0,
+  materials: [],
+});
+
 const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion, onQuickBuy, onLoadBudget, onSaveBudget, onImportMaterialPrices, onImportMaterialPricesText, onSuggestLineFromCatalog, onImportApuTemplates, onImportApuTemplatesCsv, onImportApuTemplatesCsvText }) => {
   const [selectedProjectId, setSelectedProjectId] = useState(initialProjectId || '');
   const [typology, setTypology] = useState<Typology | ''>('');
+  const [roofType, setRoofType] = useState<RoofType | ''>('');
   const [budgetLines, setBudgetLines] = useState<BudgetLine[]>([]);
   const [importStatus, setImportStatus] = useState<{ type: 'success' | 'error' | 'info', message: string } | null>(null);
   const [expandedLineId, setExpandedLineId] = useState<string | null>(null);
@@ -49,6 +91,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
       return JSON.stringify({
         selectedProjectId,
         typology: String(typology || ''),
+        roofType: String(roofType || ''),
         indirectPct: String(indirectCostPercentageStr || ''),
         lines: budgetLines,
       });
@@ -63,7 +106,40 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
     const now = snapshot();
     setIsDirty(now !== last);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [budgetLines, typology, indirectCostPercentageStr, selectedProjectId]);
+  }, [budgetLines, typology, roofType, indirectCostPercentageStr, selectedProjectId]);
+
+  const visibleBudgetLines = useMemo(() => budgetLines.filter((l) => !isRoofMetaLine(l)), [budgetLines]);
+
+  const applyRoofTypeSelection = (next: RoofType | '') => {
+    setRoofType(next);
+
+    setBudgetLines((prev) => {
+      const keep = (prev || []).filter((l) => !isRoofMetaLine(l) && !isRoofLine(l));
+      if (!next || !selectedProjectId) return keep;
+
+      const templates = DEFAULT_ROOF_BUDGET_LINES[next] ?? [];
+      const roofLines: BudgetLine[] = templates.map((tpl) => {
+        const line: BudgetLine = {
+          id: makeLineId('roof'),
+          projectId: selectedProjectId,
+          name: String(tpl.name ?? 'Techo: (sin nombre)'),
+          unit: String(tpl.unit ?? 'm2'),
+          quantity: 0,
+          directCost: 0,
+          laborCost: Number((tpl as any).laborCost ?? 0),
+          equipmentCost: Number((tpl as any).equipmentCost ?? 0),
+          materials: cloneMaterials((tpl as any).materials as any),
+        };
+        line.directCost = calculateLineTotal(line);
+        return line;
+      });
+
+      const meta = buildRoofMetaLine(selectedProjectId, next);
+
+      // Keep existing lines order stable; append roof package + meta at the end.
+      return [...keep, ...roofLines, meta];
+    });
+  };
 
   const [customLineOpen, setCustomLineOpen] = useState(false);
   const [customLineName, setCustomLineName] = useState('');
@@ -169,10 +245,12 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
     const project = projects.find(p => p.id === selectedProjectId);
     if (project) {
       setTypology(project.typology);
+      setRoofType('');
       setBudgetLines([]);
       setExpandedLineId(null);
     } else {
         setTypology('');
+        setRoofType('');
         setBudgetLines([]);
         setExpandedLineId(null);
     }
@@ -193,12 +271,15 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
           if (t === 'RESIDENCIAL' || t === 'COMERCIAL' || t === 'INDUSTRIAL' || t === 'CIVIL' || t === 'PUBLICA') {
             setTypology(t as Typology);
           }
+          const parsedRoof = parseRoofTypeFromLines(loaded.lines);
+          setRoofType(parsedRoof);
           setBudgetLines(loaded.lines);
           setIndirectCostPercentageStr(loaded.indirectPct);
           // mark clean after applying remote state
           lastLoadedSnapshotRef.current = JSON.stringify({
             selectedProjectId,
             typology: String((loaded.typology ?? '') || ''),
+            roofType: String(parsedRoof || ''),
             indirectPct: String(loaded.indirectPct || ''),
             lines: loaded.lines,
           });
@@ -233,11 +314,14 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
           if (t === 'RESIDENCIAL' || t === 'COMERCIAL' || t === 'INDUSTRIAL' || t === 'CIVIL' || t === 'PUBLICA') {
             setTypology(t as Typology);
           }
+          const parsedRoof = parseRoofTypeFromLines(loaded.lines);
+          setRoofType(parsedRoof);
           setBudgetLines(loaded.lines);
           setIndirectCostPercentageStr(loaded.indirectPct);
           lastLoadedSnapshotRef.current = JSON.stringify({
             selectedProjectId,
             typology: String((loaded.typology ?? '') || ''),
+            roofType: String(parsedRoof || ''),
             indirectPct: String(loaded.indirectPct || ''),
             lines: loaded.lines,
           });
@@ -274,11 +358,14 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
           if (t === 'RESIDENCIAL' || t === 'COMERCIAL' || t === 'INDUSTRIAL' || t === 'CIVIL' || t === 'PUBLICA') {
             setTypology(t as Typology);
           }
+          const parsedRoof = parseRoofTypeFromLines(loaded.lines);
+          setRoofType(parsedRoof);
           setBudgetLines(loaded.lines);
           setIndirectCostPercentageStr(loaded.indirectPct);
           lastLoadedSnapshotRef.current = JSON.stringify({
             selectedProjectId,
             typology: String((loaded.typology ?? '') || ''),
+            roofType: String(parsedRoof || ''),
             indirectPct: String(loaded.indirectPct || ''),
             lines: loaded.lines,
           });
@@ -300,7 +387,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
       setImportStatus({ type: 'error', message: 'Proyecto no encontrado.' });
       return;
     }
-    if (budgetLines.length === 0) {
+    if (visibleBudgetLines.length === 0) {
       setImportStatus({ type: 'info', message: 'No hay renglones para imprimir.' });
       return;
     }
@@ -344,7 +431,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
       const calcLineUnitMaterials = (line: BudgetLine): number =>
         (line.materials || []).reduce((sum, m) => sum + safeNum(m.quantityPerUnit) * safeNum(m.unitPrice), 0);
 
-      const costParts = budgetLines.reduce(
+      const costParts = visibleBudgetLines.reduce(
         (acc, line) => {
           const qty = safeNum(line.quantity);
           const matUnit = calcLineUnitMaterials(line);
@@ -380,7 +467,8 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
       doc.text(`Cliente: ${String(project.clientName || '-')}`, coverPadX, 166);
       doc.text(`Ubicación: ${String(project.location || '-')}`, coverPadX, 182);
       doc.text(`Tipología: ${String(project.typology || '-')}`, coverPadX, 198);
-      doc.text(`Responsable: ${String(project.projectManager || '-')}`, coverPadX, 214);
+      doc.text(`Techo: ${roofLabel(roofType)}`, coverPadX, 214);
+      doc.text(`Responsable: ${String(project.projectManager || '-')}`, coverPadX, 230);
 
       const drawKpiCard = (x: number, y: number, w: number, h: number, label: string, value: string) => {
         doc.setDrawColor(209, 213, 219);
@@ -491,6 +579,8 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
       cursorY += 14;
       doc.text(`Tipología: ${String(project.typology || '-')}`, 40, cursorY);
       cursorY += 14;
+      doc.text(`Techo: ${roofLabel(roofType)}`, 40, cursorY);
+      cursorY += 14;
       doc.text(`Responsable: ${String(project.projectManager || '-')}`, 40, cursorY);
       cursorY += 18;
 
@@ -548,7 +638,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
       doc.text('Resumen por capítulos', 40, afterCompositionY);
 
       const chapterAgg = new Map<string, { subtotal: number; lines: number }>();
-      budgetLines.forEach((line) => {
+      visibleBudgetLines.forEach((line) => {
         const chapterLabel = getChapterBucketLabel(getChapterNumber(String(line.name || '')));
         const subtotal = safeNum(line.directCost);
         const prev = chapterAgg.get(chapterLabel) || { subtotal: 0, lines: 0 };
@@ -583,7 +673,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
       doc.setFontSize(11);
       doc.text('Top 10 renglones por costo directo', 40, afterChaptersY);
 
-      const top = [...budgetLines]
+      const top = [...visibleBudgetLines]
         .map((line) => {
           const qty = safeNum(line.quantity);
           const matUnit = calcLineUnitMaterials(line);
@@ -637,7 +727,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
       // Lines table
       const afterTopY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 18 : afterChaptersY + 170;
 
-      const rows = budgetLines.map((line, idx) => {
+      const rows = visibleBudgetLines.map((line, idx) => {
         const matCost = (line.materials || []).reduce((sum, m) => sum + safeNum(m.quantityPerUnit) * safeNum(m.unitPrice), 0);
         const unitDirectCost = matCost + safeNum(line.laborCost) + safeNum(line.equipmentCost);
         return [
@@ -687,7 +777,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
       doc.text('Desglose de materiales por renglón', 40, groupedTitleY);
 
       const groupedBody: any[] = [];
-      for (const line of budgetLines) {
+      for (const line of visibleBudgetLines) {
         const mats = Array.isArray(line.materials) ? line.materials : [];
         if (mats.length === 0) continue;
 
@@ -750,7 +840,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
         }
       >();
 
-      for (const line of budgetLines) {
+      for (const line of visibleBudgetLines) {
         const qtyLine = safeNum(line.quantity);
         const mats = Array.isArray(line.materials) ? line.materials : [];
         for (const m of mats) {
@@ -816,7 +906,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
       setImportStatus({ type: 'error', message: 'Seleccione un proyecto para sincronizar.' });
       return;
     }
-    if (budgetLines.length === 0) {
+    if (visibleBudgetLines.length === 0) {
       setImportStatus({ type: 'info', message: 'No hay renglones para sincronizar.' });
       return;
     }
@@ -831,6 +921,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
 
     const updated = await Promise.all(
       budgetLines.map(async (line) => {
+        if (isRoofMetaLine(line) || isRoofLine(line)) return line;
         let suggestion: Partial<BudgetLine> | null = null;
 
         // Offline-first: prefer locally downloaded library.
@@ -902,6 +993,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
 
     const nextLines = await Promise.all(
       budgetLines.map(async (line) => {
+        if (isRoofMetaLine(line)) return line;
         let anyChanged = false;
 
         const nextMaterials = await Promise.all(
@@ -938,7 +1030,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
     if (!typology || !DEFAULT_BUDGET_LINES[typology]) return;
 
     const masterList = DEFAULT_BUDGET_LINES[typology];
-    const nextIndex = budgetLines.length;
+    const nextIndex = visibleBudgetLines.filter((l) => !isRoofLine(l)).length;
 
     if (nextIndex >= masterList.length) {
         setImportStatus({ type: 'info', message: 'Se han agregado todos los renglones disponibles para esta tipología.' });
@@ -1379,10 +1471,10 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
 
   // CSV Export
   const handleExportCSV = () => {
-    if (budgetLines.length === 0) return;
+    if (visibleBudgetLines.length === 0) return;
     
     const headers = ['Renglon', 'Unidad', 'Cantidad', 'CostoDirecto'];
-    const rows = budgetLines.map(line => 
+    const rows = visibleBudgetLines.map(line => 
       `"${line.name}","${line.unit}",${line.quantity},${line.directCost.toFixed(2)}`
     );
     const csvContent = [headers.join(','), ...rows].join('\n');
@@ -1510,8 +1602,8 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
 
   // Recalculate totals automatically when lines change
   const totalDirectCost = useMemo(() => 
-    budgetLines.reduce((sum, line) => sum + line.directCost, 0), 
-  [budgetLines]);
+    visibleBudgetLines.reduce((sum, line) => sum + line.directCost, 0), 
+  [visibleBudgetLines]);
 
   // Recalculate APU automatically when Direct Cost OR Indirect Percentage changes
   const { indirectCost, priceNoTax, tax, finalPrice } = useMemo(() => {
@@ -1520,8 +1612,8 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
   }, [totalDirectCost, indirectCostPercentageStr]);
 
   // Determine next line name for button label
-  const nextLineName = typology && DEFAULT_BUDGET_LINES[typology] && budgetLines.length < DEFAULT_BUDGET_LINES[typology].length 
-    ? DEFAULT_BUDGET_LINES[typology][budgetLines.length].name 
+  const nextLineName = typology && DEFAULT_BUDGET_LINES[typology] && visibleBudgetLines.filter((l) => !isRoofLine(l)).length < DEFAULT_BUDGET_LINES[typology].length 
+    ? DEFAULT_BUDGET_LINES[typology][visibleBudgetLines.filter((l) => !isRoofLine(l)).length].name 
     : null;
 
   return (
@@ -1903,7 +1995,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
       )}
 
       <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
             <label htmlFor="presupuestos-project" className="block text-sm font-medium text-gray-700 mb-1">Proyecto a Presupuestar</label>
             <select 
@@ -1924,6 +2016,28 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
               value={typology} 
               readOnly 
             />
+          </div>
+          <div>
+            <label htmlFor="presupuestos-roof-type" className="block text-sm font-medium text-gray-700 mb-1">Tipo de Techo</label>
+            <select
+              id="presupuestos-roof-type"
+              className="w-full p-2 border rounded"
+              value={roofType}
+              onChange={(e) => {
+                const raw = String(e.target.value || '').trim();
+                const next = (ROOF_TYPE_OPTIONS.some((x) => x.value === raw) ? (raw as RoofType) : '') as RoofType | '';
+                applyRoofTypeSelection(next);
+              }}
+              disabled={!selectedProjectId || !typology}
+            >
+              <option value="">Seleccione...</option>
+              {ROOF_TYPE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            <div className="text-xs text-gray-500 mt-1">Afecta cálculos/APUs y el desglose de materiales.</div>
           </div>
         </div>
       </div>
@@ -1998,7 +2112,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {budgetLines.length === 0 && (
+                {visibleBudgetLines.length === 0 && (
                    <tr>
                        <td colSpan={7} className="p-8 text-center text-gray-500">
                            <p className="mb-2">No hay renglones agregados aún.</p>
@@ -2006,7 +2120,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
                        </td>
                    </tr>
                 )}
-                {budgetLines.map(line => {
+                {visibleBudgetLines.map(line => {
                   // Automatic Calculation of Unit Direct Cost
                   const matCost = line.materials.reduce((sum, m) => sum + (m.quantityPerUnit * m.unitPrice), 0);
                   const unitDirectCost = matCost + line.laborCost + line.equipmentCost;
@@ -2305,7 +2419,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
                     </td>
                   </tr>
                 )}
-                {!nextLineName && budgetLines.length > 0 && (
+                {!nextLineName && visibleBudgetLines.length > 0 && (
                    <tr>
                        <td colSpan={7} className="p-4 text-center text-green-600 font-bold bg-green-50">
                            <CheckCircle className="inline mr-2" size={18} />

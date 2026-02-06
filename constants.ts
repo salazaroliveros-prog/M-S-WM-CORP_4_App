@@ -1,4 +1,4 @@
-import { BudgetLine, Typology } from './types';
+import { BudgetLine, Typology, RoofType } from './types';
 
 // HR Pay Rates
 export const PAY_RATES = {
@@ -203,4 +203,109 @@ export const DEFAULT_BUDGET_LINES: Record<Typology, Partial<BudgetLine>[]> = {
     { name: '29. Aulas provisionales', unit: 'm2', laborCost: 150, equipmentCost: 20, materials: [{name: 'Materiales livianos', unit: 'm2', quantityPerUnit: 1, unitPrice: 600}] },
     { name: '30. Inauguración y entrega', unit: 'global', laborCost: 2000, equipmentCost: 0, materials: [] },
   ]
+};
+
+// Roof-type packages (APU templates) to be merged into Presupuestos.
+// Quantities are user-entered in the UI; these templates provide unit factors and materials.
+export const DEFAULT_ROOF_BUDGET_LINES: Record<RoofType, Partial<BudgetLine>[]> = {
+  LOSA_SOLIDA: [
+    {
+      name: 'Techo: Losa sólida (concreto armado)',
+      unit: 'm2',
+      laborCost: 160,
+      equipmentCost: 45,
+      materials: [
+        { name: 'Concreto 3000psi', unit: 'm3', quantityPerUnit: 0.12, unitPrice: 1250 },
+        { name: 'Acero refuerzo', unit: 'qq', quantityPerUnit: 0.12, unitPrice: 480 },
+        { name: 'Formaleta', unit: 'm2', quantityPerUnit: 1.05, unitPrice: 55 },
+      ],
+    },
+    {
+      name: 'Techo: Impermeabilización',
+      unit: 'm2',
+      laborCost: 25,
+      equipmentCost: 5,
+      materials: [{ name: 'Impermeabilizante', unit: 'gal', quantityPerUnit: 0.1, unitPrice: 150 }],
+    },
+  ],
+  LOSA_PREFABRICADA: [
+    {
+      name: 'Techo: Losa prefabricada (vigueta + bovedilla)',
+      unit: 'm2',
+      laborCost: 140,
+      equipmentCost: 35,
+      materials: [
+        { name: 'Vigueta/Bovedilla', unit: 'm2', quantityPerUnit: 1.0, unitPrice: 280 },
+        { name: 'Electro malla', unit: 'm2', quantityPerUnit: 1.1, unitPrice: 15 },
+        { name: 'Concreto', unit: 'm3', quantityPerUnit: 0.08, unitPrice: 1200 },
+      ],
+    },
+    {
+      name: 'Techo: Masillado/afinamiento',
+      unit: 'm2',
+      laborCost: 30,
+      equipmentCost: 0,
+      materials: [{ name: 'Mortero', unit: 'm3', quantityPerUnit: 0.01, unitPrice: 800 }],
+    },
+    {
+      name: 'Techo: Impermeabilización',
+      unit: 'm2',
+      laborCost: 25,
+      equipmentCost: 5,
+      materials: [{ name: 'Impermeabilizante', unit: 'gal', quantityPerUnit: 0.1, unitPrice: 150 }],
+    },
+  ],
+  ESTRUCTURA_METALICA: [
+    {
+      name: 'Techo: Estructura metálica',
+      unit: 'm2',
+      laborCost: 65,
+      equipmentCost: 15,
+      materials: [
+        { name: 'Perfil estructural', unit: 'kg', quantityPerUnit: 10, unitPrice: 16 },
+        { name: 'Tornillería', unit: 'gl', quantityPerUnit: 0.02, unitPrice: 350 },
+        { name: 'Anticorrosivo/Pintura', unit: 'gl', quantityPerUnit: 0.03, unitPrice: 650 },
+      ],
+    },
+    {
+      name: 'Techo: Cubierta lámina (aluzinc/galv.)',
+      unit: 'm2',
+      laborCost: 30,
+      equipmentCost: 10,
+      materials: [{ name: 'Lámina', unit: 'm2', quantityPerUnit: 1.1, unitPrice: 90 }],
+    },
+    {
+      name: 'Techo: Canales y bajantes',
+      unit: 'ml',
+      laborCost: 25,
+      equipmentCost: 5,
+      materials: [{ name: 'Canaleta/Bajante', unit: 'ml', quantityPerUnit: 1.0, unitPrice: 85 }],
+    },
+  ],
+  PERGOLA_MADERA: [
+    {
+      name: 'Techo: Pérgola de madera (estructura)',
+      unit: 'm2',
+      laborCost: 55,
+      equipmentCost: 10,
+      materials: [
+        { name: 'Madera tratada', unit: 'pt', quantityPerUnit: 6, unitPrice: 14 },
+        { name: 'Tornillería/Conectores', unit: 'gl', quantityPerUnit: 0.03, unitPrice: 380 },
+        { name: 'Barniz/Protector', unit: 'gl', quantityPerUnit: 0.02, unitPrice: 220 },
+      ],
+    },
+  ],
+  PERGOLA_METAL: [
+    {
+      name: 'Techo: Pérgola metálica (estructura)',
+      unit: 'm2',
+      laborCost: 60,
+      equipmentCost: 12,
+      materials: [
+        { name: 'Perfil metálico', unit: 'kg', quantityPerUnit: 8, unitPrice: 16 },
+        { name: 'Tornillería', unit: 'gl', quantityPerUnit: 0.02, unitPrice: 350 },
+        { name: 'Pintura/Anticorrosivo', unit: 'gl', quantityPerUnit: 0.03, unitPrice: 650 },
+      ],
+    },
+  ],
 };

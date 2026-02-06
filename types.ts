@@ -19,6 +19,13 @@ export interface Project {
 
 export type Typology = 'RESIDENCIAL' | 'COMERCIAL' | 'INDUSTRIAL' | 'CIVIL' | 'PUBLICA';
 
+export type RoofType =
+  | 'LOSA_SOLIDA'
+  | 'LOSA_PREFABRICADA'
+  | 'ESTRUCTURA_METALICA'
+  | 'PERGOLA_MADERA'
+  | 'PERGOLA_METAL';
+
 export interface Transaction {
   id: string;
   projectId: string;
