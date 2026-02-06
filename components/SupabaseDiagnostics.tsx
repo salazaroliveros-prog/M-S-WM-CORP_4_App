@@ -59,6 +59,8 @@ const SupabaseDiagnostics: React.FC<Props> = ({ orgId, enabled }) => {
     { key: 'cleanup', title: 'Limpieza: borrar datos de prueba', status: 'pending' },
   ]);
   const [running, setRunning] = useState(false);
+  const [cleanupRunning, setCleanupRunning] = useState(false);
+  const [cleanupMsg, setCleanupMsg] = useState<string | null>(null);
 
   const summary = useMemo(() => {
     const ok = steps.filter(s => s.status === 'ok').length;
@@ -73,6 +75,127 @@ const SupabaseDiagnostics: React.FC<Props> = ({ orgId, enabled }) => {
 
   const reset = () => {
     setSteps(prev => prev.map(s => ({ ...s, status: 'pending', detail: undefined })));
+  };
+
+  const cleanupSmokeTestProjects = async () => {
+    if (!enabled || !orgId || cleanupRunning) return;
+
+    setCleanupMsg(null);
+    const confirm = window.prompt(
+      'Esto eliminará TODOS los proyectos de prueba cuyo nombre empieza con SMOKE_TEST (y sus datos asociados) para esta organización.\n\nEscriba BORRAR para confirmar:'
+    );
+    if (confirm !== 'BORRAR') {
+      setCleanupMsg('Cancelado.');
+      return;
+    }
+
+    setCleanupRunning(true);
+    const supabase = getSupabaseClient();
+
+    const cleanupProject = async (projectId: string) => {
+      // transactions
+      await supabase.from('transactions').delete().eq('org_id', orgId).eq('project_id', projectId);
+
+      // requisitions
+      const reqIdsRes = await supabase
+        .from('requisitions')
+        .select('id')
+        .eq('org_id', orgId)
+        .eq('project_id', projectId);
+      const reqIds = (reqIdsRes.data ?? []).map((r: any) => r.id).filter(Boolean);
+      if (reqIdsRes.error) throw reqIdsRes.error;
+      if (reqIds.length) {
+        const delItems = await supabase.from('requisition_items').delete().eq('org_id', orgId).in('requisition_id', reqIds);
+        if (delItems.error) throw delItems.error;
+      }
+      const delReq = await supabase.from('requisitions').delete().eq('org_id', orgId).eq('project_id', projectId);
+      if (delReq.error) throw delReq.error;
+
+      // progress
+      const header = await supabase
+        .from('project_progress')
+        .select('id')
+        .eq('org_id', orgId)
+        .eq('project_id', projectId)
+        .maybeSingle();
+      if (header.error) throw header.error;
+      const progressId = header.data?.id ?? null;
+      if (progressId) {
+        const delLines = await supabase.from('project_progress_lines').delete().eq('org_id', orgId).eq('progress_id', progressId);
+        if (delLines.error) throw delLines.error;
+        const delHeader = await supabase.from('project_progress').delete().eq('org_id', orgId).eq('id', progressId);
+        if (delHeader.error) throw delHeader.error;
+      }
+
+      // budgets
+      const budgetHeader = await supabase
+        .from('budgets')
+        .select('id')
+        .eq('org_id', orgId)
+        .eq('project_id', projectId)
+        .maybeSingle();
+      if (budgetHeader.error) throw budgetHeader.error;
+      const budgetId = budgetHeader.data?.id ?? null;
+      if (budgetId) {
+        const lineIdsRes = await supabase.from('budget_lines').select('id').eq('org_id', orgId).eq('budget_id', budgetId);
+        if (lineIdsRes.error) throw lineIdsRes.error;
+        const lineIds = (lineIdsRes.data ?? []).map((r: any) => r.id).filter(Boolean);
+        if (lineIds.length) {
+          const delMat = await supabase.from('budget_line_materials').delete().eq('org_id', orgId).in('budget_line_id', lineIds);
+          if (delMat.error) throw delMat.error;
+        }
+        const delLines = await supabase.from('budget_lines').delete().eq('org_id', orgId).eq('budget_id', budgetId);
+        if (delLines.error) throw delLines.error;
+        const delBudget = await supabase.from('budgets').delete().eq('org_id', orgId).eq('id', budgetId);
+        if (delBudget.error) throw delBudget.error;
+      }
+
+      // employees (+ attendance, tokens, contracts)
+      const empIdsRes = await supabase.from('employees').select('id').eq('org_id', orgId).eq('project_id', projectId);
+      if (empIdsRes.error) throw empIdsRes.error;
+      const empIds = (empIdsRes.data ?? []).map((r: any) => r.id).filter(Boolean);
+      if (empIds.length) {
+        const delAttendance = await supabase.from('attendance').delete().eq('org_id', orgId).in('employee_id', empIds);
+        if (delAttendance.error) throw delAttendance.error;
+        const delTokens = await supabase.from('employee_attendance_tokens').delete().eq('org_id', orgId).in('employee_id', empIds);
+        if (delTokens.error) throw delTokens.error;
+        const delContracts = await supabase.from('employee_contracts').delete().eq('org_id', orgId).in('employee_id', empIds);
+        if (delContracts.error) throw delContracts.error;
+      }
+      const delEmps = await supabase.from('employees').delete().eq('org_id', orgId).eq('project_id', projectId);
+      if (delEmps.error) throw delEmps.error;
+
+      // finally project
+      await deleteProject(orgId, projectId);
+    };
+
+    try {
+      const list = await supabase
+        .from('projects')
+        .select('id,name,created_at')
+        .eq('org_id', orgId)
+        .ilike('name', 'SMOKE_TEST%')
+        .order('created_at', { ascending: false })
+        .limit(200);
+      if (list.error) throw list.error;
+      const rows = (list.data ?? []).filter((r: any) => r?.id);
+
+      if (rows.length === 0) {
+        setCleanupMsg('No hay proyectos SMOKE_TEST para eliminar.');
+        return;
+      }
+
+      let ok = 0;
+      for (const r of rows) {
+        await cleanupProject(String(r.id));
+        ok += 1;
+      }
+      setCleanupMsg(`Eliminados ${ok} proyecto(s) SMOKE_TEST.`);
+    } catch (e: any) {
+      setCleanupMsg(safeMsg(e));
+    } finally {
+      setCleanupRunning(false);
+    }
   };
 
   const run = async () => {
@@ -409,6 +532,15 @@ const SupabaseDiagnostics: React.FC<Props> = ({ orgId, enabled }) => {
               Ejecutar
             </button>
             <button
+              onClick={cleanupSmokeTestProjects}
+              disabled={!enabled || !orgId || running || cleanupRunning}
+              className="px-4 py-2 bg-white border border-red-300 text-red-700 rounded font-bold hover:bg-red-50 flex items-center gap-2 disabled:opacity-50"
+              title="Eliminar proyectos SMOKE_TEST"
+            >
+              {cleanupRunning ? <Loader2 className="animate-spin" size={16} /> : <Trash2 size={16} />}
+              Eliminar SMOKE_TEST
+            </button>
+            <button
               onClick={reset}
               disabled={running}
               className="px-4 py-2 bg-white border rounded font-bold hover:bg-gray-50 flex items-center gap-2 disabled:opacity-50"
@@ -418,6 +550,12 @@ const SupabaseDiagnostics: React.FC<Props> = ({ orgId, enabled }) => {
             </button>
           </div>
         </div>
+
+        {cleanupMsg && (
+          <div className="mt-3 p-3 rounded border bg-gray-50 border-gray-200 text-sm text-gray-700">
+            {cleanupMsg}
+          </div>
+        )}
 
         {!enabled && (
           <div className="mt-4 p-3 rounded border bg-amber-50 border-amber-200 text-amber-800 text-sm">
