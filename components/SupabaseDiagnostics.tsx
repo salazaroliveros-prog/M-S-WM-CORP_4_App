@@ -32,6 +32,32 @@ type Step = {
   detail?: string;
 };
 
+const REALTIME_TABLES_TO_VERIFY = [
+  'projects',
+  'transactions',
+  'budgets',
+  'budget_lines',
+  'budget_line_materials',
+  'suppliers',
+  'requisitions',
+  'requisition_items',
+  'employees',
+  'employee_contracts',
+  'org_pay_rates',
+  'employee_rate_overrides',
+  'service_quotes',
+  'project_progress',
+  'project_progress_lines',
+  'attendance',
+  'employee_attendance_tokens',
+] as const;
+
+type RealtimeTableName = (typeof REALTIME_TABLES_TO_VERIFY)[number];
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+}
+
 function nowStamp() {
   const d = new Date();
   return d.toISOString().replace(/[:.]/g, '-');
@@ -49,7 +75,7 @@ interface Props {
 const SupabaseDiagnostics: React.FC<Props> = ({ orgId, enabled }) => {
   const [steps, setSteps] = useState<Step[]>([
     { key: 'projects', title: 'Proyectos: crear / listar / actualizar / borrar', status: 'pending' },
-    { key: 'realtime', title: 'Realtime: recibe eventos (transactions)', status: 'pending' },
+    { key: 'realtime', title: 'Realtime: cobertura (todas las tablas)', status: 'pending' },
     { key: 'audit', title: 'Auditoría: registra cambios (admin)', status: 'pending' },
     { key: 'budgets', title: 'Presupuestos: guardar / cargar', status: 'pending' },
     { key: 'progress', title: 'Seguimiento: guardar / cargar', status: 'pending' },
@@ -206,6 +232,32 @@ const SupabaseDiagnostics: React.FC<Props> = ({ orgId, enabled }) => {
     const stamp = nowStamp();
     const supabase = getSupabaseClient();
 
+    const realtimeSeen = new Set<RealtimeTableName>();
+    const realtimeNotes: string[] = [];
+    const realtimeChannel = supabase
+      .channel(`diag-realtime-coverage:${orgId}:${stamp}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'projects', filter: `org_id=eq.${orgId}` }, () => realtimeSeen.add('projects'))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions', filter: `org_id=eq.${orgId}` }, () => realtimeSeen.add('transactions'))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'budgets', filter: `org_id=eq.${orgId}` }, () => realtimeSeen.add('budgets'))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'budget_lines', filter: `org_id=eq.${orgId}` }, () => realtimeSeen.add('budget_lines'))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'budget_line_materials', filter: `org_id=eq.${orgId}` }, () => realtimeSeen.add('budget_line_materials'))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'suppliers', filter: `org_id=eq.${orgId}` }, () => realtimeSeen.add('suppliers'))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'requisitions', filter: `org_id=eq.${orgId}` }, () => realtimeSeen.add('requisitions'))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'requisition_items', filter: `org_id=eq.${orgId}` }, () => realtimeSeen.add('requisition_items'))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'employees', filter: `org_id=eq.${orgId}` }, () => realtimeSeen.add('employees'))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'employee_contracts', filter: `org_id=eq.${orgId}` }, () => realtimeSeen.add('employee_contracts'))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'org_pay_rates', filter: `org_id=eq.${orgId}` }, () => realtimeSeen.add('org_pay_rates'))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'employee_rate_overrides', filter: `org_id=eq.${orgId}` }, () => realtimeSeen.add('employee_rate_overrides'))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'service_quotes', filter: `org_id=eq.${orgId}` }, () => realtimeSeen.add('service_quotes'))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'project_progress', filter: `org_id=eq.${orgId}` }, () => realtimeSeen.add('project_progress'))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'project_progress_lines', filter: `org_id=eq.${orgId}` }, () => realtimeSeen.add('project_progress_lines'))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance', filter: `org_id=eq.${orgId}` }, () => realtimeSeen.add('attendance'))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'employee_attendance_tokens', filter: `org_id=eq.${orgId}` }, () => realtimeSeen.add('employee_attendance_tokens'));
+
+    const coverageSubStatus = await new Promise<string>((resolve) => {
+      realtimeChannel.subscribe((s: any) => resolve(String(s || 'unknown')));
+    });
+
     let projectId: string | null = null;
     let budgetId: string | null = null;
     let progressProjectId: string | null = null;
@@ -213,6 +265,8 @@ const SupabaseDiagnostics: React.FC<Props> = ({ orgId, enabled }) => {
     let supplierId: string | null = null;
     let employeeId: string | null = null;
     let testTxId: string | null = null;
+    let serviceQuoteId: string | null = null;
+    const smokePayRateRole = `SMOKE_TEST_ROLE_${stamp}`;
     const contractRequestId = crypto.randomUUID();
     const attendanceToken = `SMOKE_TOKEN_${stamp}`;
     const workDate = new Date().toISOString().slice(0, 10);
@@ -288,7 +342,7 @@ const SupabaseDiagnostics: React.FC<Props> = ({ orgId, enabled }) => {
         });
 
         await waitForInsert;
-        setStep('realtime', { status: 'ok', detail: `Evento INSERT recibido (subscribe=${subStatus})` });
+        setStep('realtime', { status: 'ok', detail: `OK transactions. subscribe=${subStatus}, coverageSubscribe=${coverageSubStatus}` });
         supabase.removeChannel(channel);
       } catch (e: any) {
         setStep('realtime', { status: 'fail', detail: safeMsg(e) });
@@ -394,6 +448,26 @@ const SupabaseDiagnostics: React.FC<Props> = ({ orgId, enabled }) => {
       const emps = await listEmployees(orgId);
       if (!emps.some((e: any) => e.id === employeeId)) throw new Error('Empleado no aparece en listEmployees');
 
+      // Touch org_pay_rates + employee_rate_overrides so we can confirm Realtime there too.
+      // Best-effort: do not fail whole run if user lacks permission.
+      try {
+        const upsertRates = await supabase
+          .from('org_pay_rates')
+          .upsert({ org_id: orgId, role: smokePayRateRole, daily_rate: 123 }, { onConflict: 'org_id,role' });
+        if (upsertRates.error) throw upsertRates.error;
+      } catch (e: any) {
+        realtimeNotes.push(`org_pay_rates: ${safeMsg(e)}`);
+      }
+
+      try {
+        const upsertOverride = await supabase
+          .from('employee_rate_overrides')
+          .upsert({ org_id: orgId, employee_id: employeeId, daily_rate: 111 }, { onConflict: 'org_id,employee_id' });
+        if (upsertOverride.error) throw upsertOverride.error;
+      } catch (e: any) {
+        realtimeNotes.push(`employee_rate_overrides: ${safeMsg(e)}`);
+      }
+
       await upsertEmployeeContract(orgId, {
         requestId: contractRequestId,
         status: 'sent',
@@ -411,6 +485,31 @@ const SupabaseDiagnostics: React.FC<Props> = ({ orgId, enabled }) => {
       const contracts = await listEmployeeContracts(orgId);
       if (!contracts.some((c: any) => c.request_id === contractRequestId)) throw new Error('Contrato no aparece en listEmployeeContracts');
       setStep('rrhh', { status: 'ok', detail: `employeeId=${employeeId}` });
+
+      // Touch service_quotes so we can confirm Realtime there too (Cotizador)
+      try {
+        serviceQuoteId = crypto.randomUUID();
+        const insQuote = await supabase
+          .from('service_quotes')
+          .upsert(
+            {
+              id: serviceQuoteId,
+              org_id: orgId,
+              client: `SMOKE_TEST Cliente ${stamp}`,
+              phone: '00000000',
+              address: 'SMOKE_TEST',
+              service_name: 'SMOKE_TEST Servicio',
+              quantity: 1,
+              unit: 'u',
+              unit_price: 10,
+              total: 10,
+            },
+            { onConflict: 'id' }
+          );
+        if (insQuote.error) throw insQuote.error;
+      } catch (e: any) {
+        realtimeNotes.push(`service_quotes: ${safeMsg(e)}`);
+      }
 
       // 6) Attendance
       setStep('attendance', { status: 'running' });
@@ -437,6 +536,17 @@ const SupabaseDiagnostics: React.FC<Props> = ({ orgId, enabled }) => {
       // transactions
       if (testTxId) {
         await supabase.from('transactions').delete().eq('org_id', orgId).eq('id', testTxId);
+      }
+
+      // service quote
+      if (serviceQuoteId) {
+        await supabase.from('service_quotes').delete().eq('org_id', orgId).eq('id', serviceQuoteId);
+      }
+
+      // pay rates + overrides
+      await supabase.from('org_pay_rates').delete().eq('org_id', orgId).eq('role', smokePayRateRole);
+      if (employeeId) {
+        await supabase.from('employee_rate_overrides').delete().eq('org_id', orgId).eq('employee_id', employeeId);
       }
 
       // attendance + tokens
@@ -502,6 +612,22 @@ const SupabaseDiagnostics: React.FC<Props> = ({ orgId, enabled }) => {
         await deleteProject(orgId, projectId);
       }
 
+      // Give Realtime a moment to deliver the last DELETEs
+      await sleep(900);
+
+      // Final Realtime coverage summary
+      const missing = REALTIME_TABLES_TO_VERIFY.filter((t) => !realtimeSeen.has(t));
+      const notes = realtimeNotes.length ? ` | notas: ${realtimeNotes.join(' ; ')}` : '';
+      const coverage = `vistas=${Array.from(realtimeSeen).sort().join(',') || '(ninguna)'} | faltan=${missing.join(',') || '(ninguna)'}${notes}`;
+      const current = steps.find((s) => s.key === 'realtime');
+      if (current?.status === 'ok') {
+        setStep('realtime', { detail: (current.detail ? `${current.detail} | ` : '') + coverage });
+      } else if (current?.status === 'fail') {
+        setStep('realtime', { detail: (current.detail ? `${current.detail} | ` : '') + coverage });
+      } else {
+        setStep('realtime', { status: 'ok', detail: coverage });
+      }
+
       setStep('cleanup', { status: 'ok', detail: 'Datos de prueba eliminados' });
     } catch (e: any) {
       const msg = safeMsg(e);
@@ -509,6 +635,7 @@ const SupabaseDiagnostics: React.FC<Props> = ({ orgId, enabled }) => {
       if (runningKey) setStep(runningKey, { status: 'fail', detail: msg });
       setStep('cleanup', { status: 'pending' });
     } finally {
+      supabase.removeChannel(realtimeChannel);
       setRunning(false);
     }
   };
