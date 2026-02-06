@@ -95,6 +95,18 @@ Si quieres probar el build de Pages local:
 
 La app **no hace scraping** automático de sitios. Para mantener datos **seguros y trazables**, se importan desde una URL explícita (CSV/JSON) que usted controle o desde APIs oficiales con permiso.
 
+### URLs oficiales (equipo)
+
+Pegue aquí las URLs “oficiales” que usará todo el equipo (misma fuente para todos):
+
+- **Precios (CSV):** <PEGAR_URL_CSV_AQUI>
+- **APUs (CSV o JSON):** <PEGAR_URL_APUS_AQUI>
+
+Notas:
+
+- La app es **offline-first** para estas bibliotecas: cuando importas desde URL, primero busca si ya está descargado en el navegador; si no existe, lo descarga y lo guarda en caché/biblioteca local.
+- Para “forzar” una descarga nueva: cambia la URL (por ejemplo agregando `?v=YYYYMMDD`) o limpia el almacenamiento del sitio en el navegador.
+
 ### CSV de precios (para "Actualizar Precios Web")
 
 - Debe ser una URL pública que devuelva texto CSV.
