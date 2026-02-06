@@ -160,6 +160,16 @@ describe('lib/db Supabase wiring (unit)', () => {
 
   it('Attendance + WebAuthn: uses expected RPC/table/function names', async () => {
     mockClient = createSupabaseMock({
+      getSession: () => ({
+        data: {
+          session: {
+            access_token: 'at',
+            refresh_token: 'rt',
+            user: { id: 'u1' },
+          },
+        },
+      }),
+      getUser: () => ({ data: { user: { id: 'u1' } }, error: null }),
       rpc: ({ fn }) => {
         if (fn === 'get_attendance_token_info') {
           return { data: [{ org_id: 'org1', employee_id: 'e1', employee_name: 'Emp' }], error: null };
@@ -176,10 +186,11 @@ describe('lib/db Supabase wiring (unit)', () => {
       },
     });
 
-    await expect(setEmployeeAttendanceToken('e1', 'tok')).resolves.toBeUndefined();
+    const token = 'tok_123456789012345';
+    await expect(setEmployeeAttendanceToken('e1', token)).resolves.toBeUndefined();
 
     const submitRes = await submitAttendanceWithToken({
-      token: 'tok',
+      token,
       action: 'check_in',
       lat: 1,
       lng: 2,
@@ -192,10 +203,10 @@ describe('lib/db Supabase wiring (unit)', () => {
     const rows = await listAttendanceForDate('org1', '2026-02-04');
     expect(rows).toHaveLength(1);
 
-    const info = await getAttendanceTokenInfo('tok');
+    const info = await getAttendanceTokenInfo(token);
     expect(info).toEqual({ orgId: 'org1', employeeId: 'e1', employeeName: 'Emp' });
 
-    const w = await webauthnInvoke('status', { token: 'tok' });
+    const w = await webauthnInvoke('status', { token });
     expect(w).toEqual({ ok: true });
 
     const rpcCalls = mockClient.calls.filter((c) => c.type === 'rpc').map((c) => c.fn);

@@ -27,6 +27,7 @@ create table if not exists public.material_catalog_items (
 create index if not exists material_catalog_items_org_name_idx on public.material_catalog_items(org_id, lower(name));
 create index if not exists material_catalog_items_org_norm_idx on public.material_catalog_items(org_id, name_norm);
 
+drop trigger if exists material_catalog_items_set_updated_at on public.material_catalog_items;
 create trigger material_catalog_items_set_updated_at
 before update on public.material_catalog_items
 for each row
@@ -62,6 +63,7 @@ create table if not exists public.material_price_quotes (
 
 create index if not exists material_price_quotes_material_date_idx on public.material_price_quotes(org_id, material_id, price_date desc);
 
+drop trigger if exists material_price_quotes_set_updated_at on public.material_price_quotes;
 create trigger material_price_quotes_set_updated_at
 before update on public.material_price_quotes
 for each row
@@ -121,6 +123,7 @@ create index if not exists apu_templates_org_typology_idx on public.apu_template
 create index if not exists apu_templates_org_norm_idx on public.apu_templates(org_id, typology, name_norm);
 create index if not exists apu_templates_org_name_idx on public.apu_templates(org_id, typology, lower(name));
 
+drop trigger if exists apu_templates_set_updated_at on public.apu_templates;
 create trigger apu_templates_set_updated_at
 before update on public.apu_templates
 for each row
@@ -135,11 +138,13 @@ alter table public.material_price_quotes enable row level security;
 alter table public.apu_templates enable row level security;
 
 -- material_catalog_items
+drop policy if exists material_catalog_items_select on public.material_catalog_items;
 create policy material_catalog_items_select
 on public.material_catalog_items
 for select
 using (app.is_org_member(org_id));
 
+drop policy if exists material_catalog_items_write on public.material_catalog_items;
 create policy material_catalog_items_write
 on public.material_catalog_items
 for all
@@ -147,11 +152,13 @@ using (app.is_org_member(org_id))
 with check (app.is_org_member(org_id));
 
 -- material_price_quotes
+drop policy if exists material_price_quotes_select on public.material_price_quotes;
 create policy material_price_quotes_select
 on public.material_price_quotes
 for select
 using (app.is_org_member(org_id));
 
+drop policy if exists material_price_quotes_write on public.material_price_quotes;
 create policy material_price_quotes_write
 on public.material_price_quotes
 for all
@@ -159,11 +166,13 @@ using (app.is_org_member(org_id))
 with check (app.is_org_member(org_id));
 
 -- apu_templates
+drop policy if exists apu_templates_select on public.apu_templates;
 create policy apu_templates_select
 on public.apu_templates
 for select
 using (app.is_org_member(org_id));
 
+drop policy if exists apu_templates_write on public.apu_templates;
 create policy apu_templates_write
 on public.apu_templates
 for all

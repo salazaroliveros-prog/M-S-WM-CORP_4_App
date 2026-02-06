@@ -21,6 +21,7 @@ create table if not exists public.project_progress (
 
 create index if not exists project_progress_org_project_idx on public.project_progress(org_id, project_id);
 
+drop trigger if exists project_progress_set_updated_at on public.project_progress;
 create trigger project_progress_set_updated_at
 before update on public.project_progress
 for each row
@@ -49,6 +50,7 @@ create table if not exists public.project_progress_lines (
 
 create index if not exists project_progress_lines_org_progress_idx on public.project_progress_lines(org_id, progress_id);
 
+drop trigger if exists project_progress_lines_set_updated_at on public.project_progress_lines;
 create trigger project_progress_lines_set_updated_at
 before update on public.project_progress_lines
 for each row
@@ -58,6 +60,7 @@ execute function app.tg_set_updated_at();
 alter table public.project_progress enable row level security;
 alter table public.project_progress_lines enable row level security;
 
+drop policy if exists project_progress_crud on public.project_progress;
 create policy project_progress_crud
 on public.project_progress
 for all
@@ -65,6 +68,7 @@ to authenticated
 using (app.is_org_member(org_id))
 with check (app.is_org_member(org_id));
 
+drop policy if exists project_progress_lines_crud on public.project_progress_lines;
 create policy project_progress_lines_crud
 on public.project_progress_lines
 for all

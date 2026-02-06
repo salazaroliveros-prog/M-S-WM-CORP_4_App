@@ -453,7 +453,9 @@ const RRHH: React.FC<Props> = ({ projects, onListEmployees, onCreateEmployee, on
       if (!parsed?.requestId || !parsed?.employeeName) throw new Error('Formato inválido');
 
       const parsedProjectId = (parsed as any).projectId ? String((parsed as any).projectId) : undefined;
-      const projectForEmployee = parsedProjectId || selectedProject?.id;
+      const resolvedProjectId = parsedProjectId || selectedProject?.id;
+      const projectForEmployee = resolvedProjectId;
+      const resolvedProjectName = parsed.projectName || selectedProject?.name;
 
       const record: ContractRecord = {
         requestId: parsed.requestId,
@@ -463,12 +465,12 @@ const RRHH: React.FC<Props> = ({ projects, onListEmployees, onCreateEmployee, on
           requestedAt: parsed.requestedAt,
           requestId: parsed.requestId,
           employeeId: (parsed as any).employeeId ? String((parsed as any).employeeId) : undefined,
-          projectId: parsedProjectId,
+          projectId: resolvedProjectId,
           employeeName: parsed.employeeName,
           employeePhone: (parsed as any).employeePhone ? String((parsed as any).employeePhone) : undefined,
           role: parsed.role,
           dailyRate: safeNumber(parsed.dailyRate, 0),
-          projectName: parsed.projectName,
+          projectName: resolvedProjectName,
         },
         response: parsed,
       };

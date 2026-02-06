@@ -3,6 +3,18 @@ import { getSupabaseClient } from './supabaseClient';
 
 export type DbMode = 'supabase' | 'local';
 
+function requireNonEmpty(value: unknown, label: string): string {
+  const s = String(value ?? '').trim();
+  if (!s) throw new Error(`${label} requerido.`);
+  return s;
+}
+
+function requireFiniteNumber(value: unknown, label: string): number {
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n)) throw new Error(`${label} inválido.`);
+  return n;
+}
+
 function normalizeText(input: string): string {
   return String(input || '')
     .toLowerCase()
@@ -287,6 +299,12 @@ export async function deleteProject(orgId: string, projectId: string): Promise<v
 export async function createTransaction(orgId: string, tx: Transaction): Promise<void> {
   const supabase = getSupabaseClient();
 
+  requireNonEmpty(orgId, 'orgId');
+  requireNonEmpty(tx?.projectId, 'projectId');
+  requireNonEmpty(tx?.type, 'type');
+  requireNonEmpty(tx?.date, 'date');
+  requireFiniteNumber(tx?.cost, 'cost');
+
   const res = await supabase.from('transactions').insert({
     org_id: orgId,
     project_id: tx.projectId,
@@ -310,6 +328,9 @@ export async function createTransaction(orgId: string, tx: Transaction): Promise
 
 export async function loadBudgetForProject(orgId: string, projectId: string): Promise<{ indirectPct: string; lines: BudgetLine[] } | null> {
   const supabase = getSupabaseClient();
+
+  requireNonEmpty(orgId, 'orgId');
+  requireNonEmpty(projectId, 'projectId');
 
   const budgetRes = await supabase
     .from('budgets')
@@ -383,6 +404,11 @@ export async function saveBudgetForProject(
   lines: BudgetLine[]
 ): Promise<void> {
   const supabase = getSupabaseClient();
+
+  requireNonEmpty(orgId, 'orgId');
+  requireNonEmpty(projectId, 'projectId');
+  requireNonEmpty(typology, 'typology');
+  if (!Array.isArray(lines)) throw new Error('lines inválido.');
   const indirectPct = Number.parseFloat(indirectPctStr || '0') || 0;
 
   const upsertBudget = await supabase
@@ -493,6 +519,9 @@ export type ProjectProgressPayload = {
 export async function loadProgressForProject(orgId: string, projectId: string): Promise<ProjectProgressPayload | null> {
   const supabase = getSupabaseClient();
 
+  requireNonEmpty(orgId, 'orgId');
+  requireNonEmpty(projectId, 'projectId');
+
   const header = await supabase
     .from('project_progress')
     .select('id, updated_at')
@@ -531,6 +560,9 @@ export async function loadProgressForProject(orgId: string, projectId: string): 
 
 export async function saveProgressForProject(orgId: string, projectId: string, payload: ProjectProgressPayload): Promise<void> {
   const supabase = getSupabaseClient();
+
+  requireNonEmpty(orgId, 'orgId');
+  requireNonEmpty(projectId, 'projectId');
 
   const upsert = await supabase
     .from('project_progress')
@@ -1016,9 +1048,21 @@ export async function createRequisition(
   supplierName: string | null,
   sourceBudgetLineId: string | null,
   items: Array<{ name: string; unit: string; quantity: number }>,
-  status: 'draft' | 'sent' = 'sent'
+  status: 'draft' | 'sent' = 'sent',
+  sourceLineName?: string | null
 ): Promise<void> {
   const supabase = getSupabaseClient();
+
+  requireNonEmpty(orgId, 'orgId');
+  requireNonEmpty(projectId, 'projectId');
+  if (!Array.isArray(items)) throw new Error('items inválido.');
+  if (status === 'sent' && items.length === 0) throw new Error('La requisición no puede enviarse sin ítems.');
+  for (const it of items) {
+    requireNonEmpty(it?.name, 'item.name');
+    requireNonEmpty(it?.unit, 'item.unit');
+    const qty = requireFiniteNumber(it?.quantity, 'item.quantity');
+    if (qty <= 0) throw new Error('item.quantity debe ser mayor a 0.');
+  }
 
   let supplierId: string | null = null;
   const supplierNameTrimmed = supplierName?.trim() ?? '';
@@ -1046,6 +1090,10 @@ export async function createRequisition(
     }
   }
 
+  const notesParts: string[] = [];
+  if (supplierNameTrimmed) notesParts.push(`Proveedor sugerido: ${supplierNameTrimmed}`);
+  if (sourceLineName && String(sourceLineName).trim()) notesParts.push(`Renglón presupuesto: ${String(sourceLineName).trim()}`);
+
   const req = await supabase
     .from('requisitions')
     .insert({
@@ -1053,7 +1101,7 @@ export async function createRequisition(
       project_id: projectId,
       supplier_id: supplierId,
       status,
-      notes: supplierNameTrimmed ? `Proveedor sugerido: ${supplierNameTrimmed}` : null,
+      notes: notesParts.length > 0 ? notesParts.join('\n') : null,
       source_budget_line_id: sourceBudgetLineId,
       sent_at: status === 'sent' ? new Date().toISOString() : null,
     })
@@ -1079,12 +1127,14 @@ export async function createRequisition(
 
 export async function listRequisitions(
   orgId: string
-): Promise<Array<{ id: string; requestedAt: string; supplierName: string | null; supplierNote: string | null; total: number; status: string }>> {
+): Promise<Array<{ id: string; projectId: string | null; requestedAt: string; supplierName: string | null; supplierNote: string | null; total: number; status: string }>> {
   const supabase = getSupabaseClient();
+
+  requireNonEmpty(orgId, 'orgId');
 
   const res = await supabase
     .from('v_requisition_totals')
-    .select('requisition_id, requested_at, total_amount, status, supplier_name, notes')
+    .select('requisition_id, project_id, requested_at, total_amount, status, supplier_name, notes')
     .eq('org_id', orgId)
     .order('requested_at', { ascending: false })
     .limit(20);
@@ -1093,6 +1143,7 @@ export async function listRequisitions(
 
   return (res.data ?? []).map((r: any) => ({
     id: r.requisition_id,
+    projectId: r.project_id ? String(r.project_id) : null,
     requestedAt: r.requested_at,
     supplierName: r.supplier_name ? String(r.supplier_name) : null,
     supplierNote: r.notes ? String(r.notes) : null,
@@ -1107,6 +1158,8 @@ export async function listRequisitions(
 
 export async function listEmployees(orgId: string) {
   const supabase = getSupabaseClient();
+
+  requireNonEmpty(orgId, 'orgId');
   const res = await supabase
     .from('employees')
     .select('*')
@@ -1119,6 +1172,11 @@ export async function listEmployees(orgId: string) {
 
 export async function createEmployee(orgId: string, input: { name: string; dpi?: string; phone?: string; position: string; dailyRate: number; projectId?: string | null }) {
   const supabase = getSupabaseClient();
+
+  requireNonEmpty(orgId, 'orgId');
+  requireNonEmpty(input?.name, 'name');
+  requireNonEmpty(input?.position, 'position');
+  requireFiniteNumber(input?.dailyRate, 'dailyRate');
   const res = await supabase
     .from('employees')
     .insert({
@@ -1144,6 +1202,8 @@ export async function createEmployee(orgId: string, input: { name: string; dpi?:
 
 export async function listEmployeeContracts(orgId: string, limit = 30): Promise<any[]> {
   const supabase = getSupabaseClient();
+
+  requireNonEmpty(orgId, 'orgId');
   const res = await supabase
     .from('employee_contracts')
     .select('*')
@@ -1169,6 +1229,9 @@ export async function upsertEmployeeContract(
   }
 ): Promise<any> {
   const supabase = getSupabaseClient();
+
+  requireNonEmpty(orgId, 'orgId');
+  requireNonEmpty(input?.requestId, 'requestId');
 
   const seed = input.seed ?? {};
   const requestedAt = input.requestedAt ?? seed.requestedAt ?? new Date().toISOString();
@@ -1212,13 +1275,39 @@ export async function upsertEmployeeContract(
 // Attendance (GPS + biometric payload)
 // -----------------------------------------------------------------------------
 
+function normalizeAttendanceToken(token: unknown): string {
+  const t = String(token ?? '').trim();
+  if (!t) throw new Error('token requerido.');
+  if (t.length < 16) throw new Error('token inválido.');
+  return t;
+}
+
+function rethrowAttendanceRpcError(err: any, context: string): never {
+  const msg = String(err?.message ?? err ?? '').trim();
+  const lower = msg.toLowerCase();
+  if (lower.includes('no autorizado') || lower.includes('not authorized') || lower.includes('permission denied')) {
+    throw new Error(`${context}: no autorizado.`);
+  }
+  throw new Error(`${context}: ${msg || 'error desconocido.'}`);
+}
+
 export async function setEmployeeAttendanceToken(employeeId: string, token: string): Promise<void> {
   const supabase = getSupabaseClient();
+
+  requireNonEmpty(employeeId, 'employeeId');
+  const tokenTrimmed = normalizeAttendanceToken(token);
+
+  // This RPC is admin-only; ensure we have a real JWT session.
+  const sess = await supabase.auth.getSession();
+  if (!sess.data.session) {
+    await ensureSupabaseSession();
+  }
+
   const res = await supabase.rpc('set_employee_attendance_token', {
     p_employee_id: employeeId,
-    p_token: token,
+    p_token: tokenTrimmed,
   });
-  if (res.error) throw res.error;
+  if (res.error) rethrowAttendanceRpcError(res.error, 'No se pudo asignar/rotar el token de asistencia (requiere admin)');
 }
 
 export async function submitAttendanceWithToken(input: {
@@ -1232,11 +1321,19 @@ export async function submitAttendanceWithToken(input: {
   device?: any | null;
 }): Promise<any> {
   const supabase = getSupabaseClient();
+
+  const tokenTrimmed = normalizeAttendanceToken(input?.token);
+  requireNonEmpty(input?.action, 'action');
+  const lat = requireFiniteNumber(input?.lat, 'lat');
+  const lng = requireFiniteNumber(input?.lng, 'lng');
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) throw new Error('Ubicación inválida.');
+  if (input?.biometric == null) throw new Error('Biometría requerida.');
+
   const args: Record<string, any> = {
-    p_token: input.token,
+    p_token: tokenTrimmed,
     p_action: input.action,
-    p_lat: input.lat,
-    p_lng: input.lng,
+    p_lat: lat,
+    p_lng: lng,
     p_accuracy_m: input.accuracyM ?? null,
     p_biometric: input.biometric ?? null,
     p_device: input.device ?? null,
@@ -1245,12 +1342,15 @@ export async function submitAttendanceWithToken(input: {
     args.p_work_date = input.workDate;
   }
   const res = await supabase.rpc('submit_attendance_with_token', args);
-  if (res.error) throw res.error;
+  if (res.error) rethrowAttendanceRpcError(res.error, 'No se pudo registrar la asistencia');
   return res.data;
 }
 
 export async function listAttendanceForDate(orgId: string, workDate: string): Promise<any[]> {
   const supabase = getSupabaseClient();
+
+  requireNonEmpty(orgId, 'orgId');
+  requireNonEmpty(workDate, 'workDate');
   const res = await supabase
     .from('v_attendance_daily')
     .select('*')
@@ -1264,8 +1364,9 @@ export async function listAttendanceForDate(orgId: string, workDate: string): Pr
 
 export async function getAttendanceTokenInfo(token: string): Promise<{ orgId: string; employeeId: string; employeeName: string } | null> {
   const supabase = getSupabaseClient();
-  const res = await supabase.rpc('get_attendance_token_info', { p_token: token });
-  if (res.error) throw res.error;
+  const tokenTrimmed = normalizeAttendanceToken(token);
+  const res = await supabase.rpc('get_attendance_token_info', { p_token: tokenTrimmed });
+  if (res.error) rethrowAttendanceRpcError(res.error, 'No se pudo consultar el token');
   const row = Array.isArray(res.data) ? res.data[0] : res.data;
   if (!row?.org_id || !row?.employee_id) return null;
   return {

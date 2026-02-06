@@ -24,6 +24,21 @@ function cors(origin: string | null) {
   return headers;
 }
 
+function parseAllowedOrigins(value: string | undefined | null): string[] {
+  const raw = String(value ?? '').trim();
+  if (!raw) return [];
+  return raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function isOriginAllowed(origin: string, allowed: string[]): boolean {
+  if (!origin) return false;
+  if (allowed.length === 0) return true; // default: allow any origin
+  return allowed.includes(origin);
+}
+
 function hostnameFromOrigin(origin: string) {
   try {
     return new URL(origin).hostname;
@@ -116,7 +131,9 @@ async function loadLatestChallenge(supabaseAdmin: any, input: { orgId: string; e
 
 Deno.serve(async (req) => {
   const origin = req.headers.get('origin');
-  const headers = cors(origin);
+  const allowedOrigins = parseAllowedOrigins(Deno.env.get('ALLOWED_ORIGINS'));
+  const originAllowed = origin ? isOriginAllowed(origin, allowedOrigins) : false;
+  const headers = cors(originAllowed ? origin : null);
 
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers });
@@ -127,6 +144,10 @@ Deno.serve(async (req) => {
   }
 
   try {
+    if (origin && !originAllowed) {
+      return json({ error: 'Origin no permitido' }, { status: 403, headers });
+    }
+
     const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
     const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
     if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {

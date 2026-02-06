@@ -41,6 +41,7 @@ create index if not exists employee_contracts_org_requested_idx on public.employ
 create index if not exists employee_contracts_org_employee_idx on public.employee_contracts(org_id, employee_id);
 create index if not exists employee_contracts_org_project_idx on public.employee_contracts(org_id, project_id);
 
+drop trigger if exists employee_contracts_set_updated_at on public.employee_contracts;
 create trigger employee_contracts_set_updated_at
 before update on public.employee_contracts
 for each row
@@ -48,6 +49,7 @@ execute function app.tg_set_updated_at();
 
 alter table public.employee_contracts enable row level security;
 
+drop policy if exists employee_contracts_crud on public.employee_contracts;
 create policy employee_contracts_crud
 on public.employee_contracts
 for all

@@ -25,26 +25,40 @@ View your app in AI Studio: https://ai.studio/apps/temp/2
 
 ## Tests
 
+### Windows + nvm (si `node`/`npm` no aparecen en PATH)
+
+En algunos entornos Windows, aunque `nvm` esté instalado, PowerShell puede no encontrar `node`/`npm` en `PATH`.
+
+1. Verifica `nvm`:
+   `nvm version`
+2. Instala y activa una versión (ejemplo LTS):
+   `nvm install 24.13.0`
+   `nvm use 24.13.0`
+3. Si aun así `node -v` falla, agrega temporalmente el symlink de nvm al `PATH` en la **misma** sesión de PowerShell:
+   `$env:PATH = "C:\\nvm4w\\nodejs;" + $env:PATH`
+   `node -v`
+   `npm -v`
+
 - Unit tests (sin Supabase, usando mocks): `npm test`
 - Integration tests (con Supabase real):
-   - Cree `.env.local` desde [.env.local.example](.env.local.example) y defina **ambas** variables `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY`.
-   - Recomendado: cree un usuario de prueba en **Supabase → Authentication → Users** y agregue en `.env.local`:
-     - `SUPABASE_TEST_EMAIL`
-     - `SUPABASE_TEST_PASSWORD`
-     (esto evita depender de Anonymous sign-in y reduce rate limiting en CI)
-    - Si el usuario de prueba no tiene permisos por RLS (no pertenece a una organización), ejecute el script:
-       - [supabase/scripts/bootstrap_test_user_org.sql](supabase/scripts/bootstrap_test_user_org.sql)
-   - Luego ejecute: `npm run test:supabase`
+  - Cree `.env.local` desde [.env.local.example](.env.local.example) y defina **ambas** variables `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY`.
+  - Recomendado: cree un usuario de prueba en **Supabase → Authentication → Users** y agregue en `.env.local`:
+    - `SUPABASE_TEST_EMAIL`
+    - `SUPABASE_TEST_PASSWORD`
+    (esto evita depender de Anonymous sign-in y reduce rate limiting en CI)
+  - Si el usuario de prueba no tiene permisos por RLS (no pertenece a una organización), ejecute el script:
+    - [supabase/scripts/bootstrap_test_user_org.sql](supabase/scripts/bootstrap_test_user_org.sql)
+  - Luego ejecute: `npm run test:supabase`
 
-   ### Realtime (opcional)
+### Realtime (opcional)
 
-   Por defecto, Supabase Realtime se habilita **por tabla**. Si quieres suscripciones en tiempo real desde `supabase-js` (canales `postgres_changes`):
+Por defecto, Supabase Realtime se habilita **por tabla**. Si quieres suscripciones en tiempo real desde `supabase-js` (canales `postgres_changes`):
 
-   - En Supabase Dashboard: **Database → Replication → Realtime** y activa las tablas que te interesan (por ejemplo `transactions`).
-   - Alternativa por SQL (idempotente): ejecuta [supabase/scripts/enable_realtime_publication.sql](supabase/scripts/enable_realtime_publication.sql).
+- En Supabase Dashboard: **Database → Replication → Realtime** y activa las tablas que te interesan (por ejemplo `transactions`).
+- Alternativa por SQL (idempotente): ejecuta [supabase/scripts/enable_realtime_publication.sql](supabase/scripts/enable_realtime_publication.sql).
 
-   El repo incluye un test opcional: [tests/integration/supabase.realtime.integration.test.ts](tests/integration/supabase.realtime.integration.test.ts). Por defecto solo avisa con `console.warn` si no llegan eventos.
-   Si quieres que falle cuando no haya Realtime, define `SUPABASE_REQUIRE_REALTIME=true` y corre `npm run test:supabase`.
+El repo incluye un test opcional: [tests/integration/supabase.realtime.integration.test.ts](tests/integration/supabase.realtime.integration.test.ts). Por defecto solo avisa con `console.warn` si no llegan eventos.
+Si quieres que falle cuando no haya Realtime, define `SUPABASE_REQUIRE_REALTIME=true` y corre `npm run test:supabase`.
 
 ## Deploy a GitHub Pages
 

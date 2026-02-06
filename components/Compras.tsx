@@ -7,7 +7,7 @@ interface Props {
   initialData?: RequisitionData | null;
   onLoadBudget?: (projectId: string) => Promise<{ lines: BudgetLine[] } | null>;
   onCreateRequisition?: (data: RequisitionData, supplierName: string | null) => Promise<void>;
-  onListRequisitions?: () => Promise<Array<{ id: string; requestedAt: string; supplierName?: string | null; supplierNote?: string | null; total: number; status: string }>>;
+  onListRequisitions?: () => Promise<Array<{ id: string; projectId: string | null; requestedAt: string; supplierName?: string | null; supplierNote?: string | null; total: number; status: string }>>;
 }
 
 type DerivedMaterial = {
@@ -309,7 +309,12 @@ const Compras: React.FC<Props> = ({ projects, initialData, onLoadBudget, onCreat
     };
   }, [selectedProjectId, onLoadBudget]);
 
-  const [history, setHistory] = useState<Array<{ id: string; requestedAt: string; supplierName?: string | null; supplierNote?: string | null; total: number; status: string }>>([]);
+  const [history, setHistory] = useState<Array<{ id: string; projectId: string | null; requestedAt: string; supplierName?: string | null; supplierNote?: string | null; total: number; status: string }>>([]);
+
+  const visibleHistory = useMemo(() => {
+    if (!selectedProjectId) return history;
+    return history.filter((h) => String(h.projectId || '') === String(selectedProjectId));
+  }, [history, selectedProjectId]);
 
   useEffect(() => {
     if (!onListRequisitions) return;
@@ -841,14 +846,14 @@ const Compras: React.FC<Props> = ({ projects, initialData, onLoadBudget, onCreat
               </tr>
             </thead>
             <tbody>
-              {history.length === 0 ? (
+              {visibleHistory.length === 0 ? (
                 <tr>
                   <td className="p-3" colSpan={4}>
                     <span className="text-gray-400 italic">Sin historial aún.</span>
                   </td>
                 </tr>
               ) : (
-                history.map(h => (
+                visibleHistory.map(h => (
                   <tr key={h.id}>
                     <td className="p-3">{new Date(h.requestedAt).toLocaleDateString()}</td>
                     <td className="p-3">{h.supplierName || h.supplierNote || '-'}</td>

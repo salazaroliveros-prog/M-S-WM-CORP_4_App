@@ -241,7 +241,8 @@ const App: React.FC = () => {
       supplierName,
       data.sourceBudgetLineId ?? null,
       data.items,
-      'sent'
+      'sent',
+      data.sourceLineName ?? null
     );
   };
 
