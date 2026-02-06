@@ -4,6 +4,14 @@ import { DEFAULT_BUDGET_LINES, calculateAPU } from '../constants';
 import { Printer, Save, RefreshCw, Upload, Download, AlertTriangle, CheckCircle, ChevronDown, ChevronUp, Plus, Trash2, Calculator, ShoppingCart, ArrowRight, X, List } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import {
+  getCachedUrlText,
+  setCachedUrlText,
+  suggestLineFromOfflineCatalog,
+  upsertApuTemplatesFromCsvText,
+  upsertApuTemplatesFromJsonText,
+  upsertMaterialPricesFromCsvText,
+} from '../lib/offlineCatalog';
 
 interface Props {
   projects: Project[];
@@ -17,6 +25,7 @@ interface Props {
   onImportApuTemplates?: (input: { url: string; source?: string; currency?: string }) => Promise<{ templatesUpserted: number }>;
   onImportApuTemplatesCsv?: (input: { url: string; source?: string; currency?: string }) => Promise<{ templatesUpserted: number }>;
   onImportApuTemplatesCsvText?: (input: { csvText: string; source?: string; currency?: string }) => Promise<{ templatesUpserted: number }>;
+  onImportApuTemplatesJsonText?: (input: { jsonText: string; source?: string; currency?: string; sourceUrl?: string | null }) => Promise<{ templatesUpserted: number }>;
 }
 
 const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy, onLoadBudget, onSaveBudget, onImportMaterialPrices, onImportMaterialPricesText, onSuggestLineFromCatalog, onImportApuTemplates, onImportApuTemplatesCsv, onImportApuTemplatesCsvText }) => {
@@ -580,15 +589,30 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
 
     setImportStatus({ type: 'info', message: 'Sincronizando factores...' });
     let updatedCount = 0;
+    let usedOffline = 0;
     let usedCloud = 0;
 
     const updated = await Promise.all(
       budgetLines.map(async (line) => {
         let suggestion: Partial<BudgetLine> | null = null;
+
+        // Offline-first: prefer locally downloaded library.
+        try {
+          const offline = await suggestLineFromOfflineCatalog({ typology: String(typology), lineName: line.name });
+          if (offline) {
+            suggestion = offline as any;
+            usedOffline++;
+          }
+        } catch {
+          // ignore offline errors per-line
+        }
+
         if (onSuggestLineFromCatalog) {
           try {
-            suggestion = await onSuggestLineFromCatalog(String(typology), line.name);
-            if (suggestion) usedCloud++;
+            if (!suggestion) {
+              suggestion = await onSuggestLineFromCatalog(String(typology), line.name);
+              if (suggestion) usedCloud++;
+            }
           } catch {
             // ignore cloud errors per-line; we'll fallback
           }
@@ -617,7 +641,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
     setBudgetLines(updated);
     setImportStatus({
       type: 'success',
-      message: `Factores sincronizados. Renglones actualizados: ${updatedCount}. ${usedCloud > 0 ? `Fuente: Supabase (${usedCloud}).` : 'Fuente: catálogo interno.'}`
+      message: `Factores sincronizados. Renglones actualizados: ${updatedCount}. ${usedOffline > 0 ? `Fuente: biblioteca local (${usedOffline}).` : (usedCloud > 0 ? `Fuente: Supabase (${usedCloud}).` : 'Fuente: catálogo interno.')}`
     });
   };
 
@@ -635,7 +659,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
     return unitDirectCost * line.quantity;
   };
 
-  const handleAddNextLine = () => {
+  const handleAddNextLine = async () => {
     if (!typology || !DEFAULT_BUDGET_LINES[typology]) return;
 
     const masterList = DEFAULT_BUDGET_LINES[typology];
@@ -659,6 +683,23 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
             equipmentCost: nextItem.equipmentCost || 0,
             materials: nextItem.materials ? [...nextItem.materials] : []
         };
+
+        // Auto-fill from locally downloaded library (offline-first).
+        try {
+          const offline = await suggestLineFromOfflineCatalog({ typology: String(typology), lineName: newLine.name });
+          if (offline) {
+            newLine.unit = String((offline as any).unit ?? newLine.unit);
+            newLine.laborCost = Number((offline as any).laborCost ?? newLine.laborCost ?? 0);
+            newLine.equipmentCost = Number((offline as any).equipmentCost ?? newLine.equipmentCost ?? 0);
+            if (Array.isArray((offline as any).materials)) {
+              newLine.materials = [...((offline as any).materials as MaterialItem[])];
+            }
+          }
+        } catch {
+          // ignore
+        }
+
+        newLine.directCost = calculateLineTotal(newLine);
         setBudgetLines(prev => [...prev, newLine]);
         setImportStatus(null);
         // Automatically expand the new line for data entry
@@ -739,8 +780,22 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
     }
 
     let base: any = {};
+    let usedOffline = false;
     let usedCloud = false;
-    if (customLineAutoFill && customLineUseCloudCatalog && onSuggestLineFromCatalog) {
+
+    if (customLineAutoFill) {
+      try {
+        const offline = await suggestLineFromOfflineCatalog({ typology: String(typology), lineName: customLineName });
+        if (offline) {
+          base = offline;
+          usedOffline = true;
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    if (!usedOffline && customLineAutoFill && customLineUseCloudCatalog && onSuggestLineFromCatalog) {
       try {
         const cloud = await onSuggestLineFromCatalog(String(typology), customLineName);
         if (cloud) {
@@ -752,7 +807,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
       }
     }
 
-    if (!usedCloud) {
+    if (!usedOffline && !usedCloud) {
       const suggestion = customLineAutoFill ? suggestFromCatalog(customLineName, typology as Typology) : null;
       base = suggestion ?? {};
     }
@@ -775,7 +830,14 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
     setBudgetLines((prev) => [...prev, newLine]);
     setExpandedLineId(newLine.id);
     setCustomLineOpen(false);
-    setImportStatus({ type: 'success', message: usedCloud ? 'Renglón agregado con parámetros del catálogo (Supabase).' : (customLineAutoFill ? 'Renglón agregado con parámetros sugeridos del catálogo interno.' : 'Renglón agregado.') });
+    setImportStatus({
+      type: 'success',
+      message: usedOffline
+        ? 'Renglón agregado con parámetros de la biblioteca local.'
+        : usedCloud
+          ? 'Renglón agregado con parámetros del catálogo (Supabase).'
+          : (customLineAutoFill ? 'Renglón agregado con parámetros sugeridos del catálogo interno.' : 'Renglón agregado.'),
+    });
 
     saveCustomTemplateLocal(typology as Typology, newLine);
   };
@@ -799,26 +861,30 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
       const vendor = priceImportVendor.trim();
       const currency = (priceImportCurrency || 'GTQ').trim();
 
+      const fetchCsvText = async (normalizedUrl: string): Promise<{ text: string; fromCache: boolean }> => {
+        const cached = await getCachedUrlText(normalizedUrl);
+        if (cached && cached.trim()) return { text: cached, fromCache: true };
+        const res = await fetch(normalizedUrl);
+        if (!res.ok) throw new Error(`No se pudo descargar CSV (${res.status}).`);
+        const text = await res.text();
+        await setCachedUrlText(normalizedUrl, text);
+        return { text, fromCache: false };
+      };
+
       if (priceImportMode === 'file') {
-        if (!onImportMaterialPricesText) {
-          setImportStatus({ type: 'info', message: 'Importación por archivo no configurada (requiere Supabase).' });
-          setPriceImportOpen(false);
-          return;
-        }
         if (!priceImportFile) {
           setImportStatus({ type: 'error', message: 'Seleccione un archivo CSV.' });
           return;
         }
         const csvText = await priceImportFile.text();
-        const r = await onImportMaterialPricesText({ csvText, vendor, currency });
-        setImportStatus({ type: 'success', message: `Catálogo actualizado. Materiales: ${r.materialsUpserted}, Precios: ${r.quotesUpserted}.` });
+        const localRes = await upsertMaterialPricesFromCsvText({ csvText, vendor, currency, sourceUrl: null });
+        let supaMsg = '';
+        if (onImportMaterialPricesText) {
+          const r = await onImportMaterialPricesText({ csvText, vendor, currency });
+          supaMsg = ` Supabase: Materiales ${r.materialsUpserted}, Precios ${r.quotesUpserted}.`;
+        }
+        setImportStatus({ type: 'success', message: `Biblioteca local actualizada: ${localRes.itemsUpserted} precios.${supaMsg}` });
         saveImportPrefs({ priceVendor: vendor, priceCurrency: currency });
-        setPriceImportOpen(false);
-        return;
-      }
-
-      if (!onImportMaterialPrices) {
-        setImportStatus({ type: 'info', message: 'Importación por URL no configurada (requiere Supabase).' });
         setPriceImportOpen(false);
         return;
       }
@@ -827,8 +893,22 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
         return;
       }
       const normalized = toPublicGoogleSheetsCsvUrl(priceImportUrl.trim());
-      const r = await onImportMaterialPrices({ url: normalized, vendor, currency });
-      setImportStatus({ type: 'success', message: `Catálogo actualizado. Materiales: ${r.materialsUpserted}, Precios: ${r.quotesUpserted}.` });
+      const { text: csvText, fromCache } = await fetchCsvText(normalized);
+      const localRes = await upsertMaterialPricesFromCsvText({ csvText, vendor, currency, sourceUrl: normalized });
+
+      let supaMsg = '';
+      if (onImportMaterialPricesText) {
+        const r = await onImportMaterialPricesText({ csvText, vendor, currency });
+        supaMsg = ` Supabase: Materiales ${r.materialsUpserted}, Precios ${r.quotesUpserted}.`;
+      } else if (onImportMaterialPrices) {
+        const r = await onImportMaterialPrices({ url: normalized, vendor, currency });
+        supaMsg = ` Supabase: Materiales ${r.materialsUpserted}, Precios ${r.quotesUpserted}.`;
+      }
+
+      setImportStatus({
+        type: 'success',
+        message: `Biblioteca local: ${localRes.itemsUpserted} precios (${fromCache ? 'desde caché' : 'descargado'}).${supaMsg}`
+      });
       saveImportPrefs({ priceUrl: normalized, priceVendor: vendor, priceCurrency: currency });
       setPriceImportOpen(false);
     } catch (e: any) {
@@ -841,14 +921,19 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
       const currency = (apuImportCurrency || 'GTQ').trim();
       const source = apuImportSource.trim() || undefined;
 
+      const fetchText = async (normalizedUrl: string): Promise<{ text: string; fromCache: boolean }> => {
+        const cached = await getCachedUrlText(normalizedUrl);
+        if (cached && cached.trim()) return { text: cached, fromCache: true };
+        const res = await fetch(normalizedUrl);
+        if (!res.ok) throw new Error(`No se pudo descargar archivo (${res.status}).`);
+        const text = await res.text();
+        await setCachedUrlText(normalizedUrl, text);
+        return { text, fromCache: false };
+      };
+
       if (apuImportMode === 'file') {
         if (apuImportFormat !== 'csv') {
           setImportStatus({ type: 'error', message: 'En modo archivo solo soportamos CSV por ahora.' });
-          return;
-        }
-        if (!onImportApuTemplatesCsvText) {
-          setImportStatus({ type: 'info', message: 'Importación APU por archivo no configurada (requiere Supabase).' });
-          setApuImportOpen(false);
           return;
         }
         if (!apuImportFile) {
@@ -856,16 +941,16 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
           return;
         }
         const csvText = await apuImportFile.text();
-        const r = await onImportApuTemplatesCsvText({ csvText, source, currency });
-        setImportStatus({ type: 'success', message: `APUs actualizados. Plantillas: ${r.templatesUpserted}.` });
-        saveImportPrefs({ apuSource: apuImportSource.trim(), apuCurrency: currency, apuFormat: apuImportFormat });
-        setApuImportOpen(false);
-        return;
-      }
+        const localRes = await upsertApuTemplatesFromCsvText({ csvText, source, currency, sourceUrl: null });
 
-      const handler = apuImportFormat === 'json' ? onImportApuTemplates : onImportApuTemplatesCsv;
-      if (!handler) {
-        setImportStatus({ type: 'info', message: 'Importación APU no configurada (requiere Supabase).' });
+        let supaMsg = '';
+        if (onImportApuTemplatesCsvText) {
+          const r = await onImportApuTemplatesCsvText({ csvText, source, currency });
+          supaMsg = ` Supabase: ${r.templatesUpserted} plantillas.`;
+        }
+
+        setImportStatus({ type: 'success', message: `Biblioteca local: ${localRes.templatesUpserted} plantillas.${supaMsg}` });
+        saveImportPrefs({ apuSource: apuImportSource.trim(), apuCurrency: currency, apuFormat: apuImportFormat });
         setApuImportOpen(false);
         return;
       }
@@ -875,8 +960,35 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
       }
 
       const normalized = apuImportFormat === 'csv' ? toPublicGoogleSheetsCsvUrl(apuImportUrl.trim()) : apuImportUrl.trim();
-      const r = await handler({ url: normalized, source, currency });
-      setImportStatus({ type: 'success', message: `APUs actualizados. Plantillas: ${r.templatesUpserted}.` });
+      const { text, fromCache } = await fetchText(normalized);
+
+      const localRes = apuImportFormat === 'csv'
+        ? await upsertApuTemplatesFromCsvText({ csvText: text, source, currency, sourceUrl: normalized })
+        : await upsertApuTemplatesFromJsonText({ jsonText: text, source, currency, sourceUrl: normalized });
+
+      let supaMsg = '';
+      if (apuImportFormat === 'csv') {
+        if (onImportApuTemplatesCsvText) {
+          const r = await onImportApuTemplatesCsvText({ csvText: text, source, currency });
+          supaMsg = ` Supabase: ${r.templatesUpserted} plantillas.`;
+        } else if (onImportApuTemplatesCsv) {
+          const r = await onImportApuTemplatesCsv({ url: normalized, source, currency });
+          supaMsg = ` Supabase: ${r.templatesUpserted} plantillas.`;
+        }
+      } else {
+        if (onImportApuTemplatesJsonText) {
+          const r = await onImportApuTemplatesJsonText({ jsonText: text, source, currency, sourceUrl: normalized });
+          supaMsg = ` Supabase: ${r.templatesUpserted} plantillas.`;
+        } else if (onImportApuTemplates) {
+          const r = await onImportApuTemplates({ url: normalized, source, currency });
+          supaMsg = ` Supabase: ${r.templatesUpserted} plantillas.`;
+        }
+      }
+
+      setImportStatus({
+        type: 'success',
+        message: `Biblioteca local: ${localRes.templatesUpserted} plantillas (${fromCache ? 'desde caché' : 'descargado'}).${supaMsg}`
+      });
       saveImportPrefs({ apuUrl: normalized, apuSource: apuImportSource.trim(), apuCurrency: (apuImportCurrency || 'GTQ').trim(), apuFormat: apuImportFormat });
       setApuImportOpen(false);
     } catch (e: any) {

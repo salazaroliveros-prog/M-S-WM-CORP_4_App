@@ -18,6 +18,7 @@ import {
   importMaterialPricesFromCsvText,
   suggestLineFromApuCatalog,
   importApuTemplatesFromJsonUrl,
+  importApuTemplatesFromJsonText,
   importApuTemplatesFromCsvUrl,
   importApuTemplatesFromCsvText,
   createRequisition,
@@ -336,6 +337,11 @@ const App: React.FC = () => {
   const handleImportApuTemplates = async (input: { url: string; source?: string; currency?: string }) => {
     if (!useCloud || !orgId) throw new Error('Supabase no disponible (modo local).');
     return await importApuTemplatesFromJsonUrl(orgId, input);
+  };
+
+  const handleImportApuTemplatesJsonText = async (input: { jsonText: string; source?: string; currency?: string; sourceUrl?: string | null }) => {
+    if (!useCloud || !orgId) throw new Error('Supabase no disponible (modo local).');
+    return await importApuTemplatesFromJsonText(orgId, input);
   };
 
   const handleImportApuTemplatesCsv = async (input: { url: string; source?: string; currency?: string }) => {
@@ -714,6 +720,7 @@ const App: React.FC = () => {
                 onImportMaterialPricesText={handleImportMaterialPricesText}
                 onSuggestLineFromCatalog={handleSuggestLineFromCatalog}
                 onImportApuTemplates={handleImportApuTemplates}
+                onImportApuTemplatesJsonText={handleImportApuTemplatesJsonText}
                 onImportApuTemplatesCsv={handleImportApuTemplatesCsv}
                 onImportApuTemplatesCsvText={handleImportApuTemplatesCsvText}
               />

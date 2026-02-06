@@ -899,6 +899,71 @@ export async function importApuTemplatesFromJsonUrl(
   return { templatesUpserted: payload.length };
 }
 
+export async function importApuTemplatesFromJsonText(
+  orgId: string,
+  input: { jsonText: string; source?: string; currency?: string; sourceUrl?: string | null }
+): Promise<{ templatesUpserted: number }>
+{
+  const supabase = getSupabaseClient();
+  const text = input.jsonText ?? '';
+  if (!String(text).trim()) throw new Error('JSON requerido.');
+
+  let data: any;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error('Respuesta JSON inválida.');
+  }
+
+  const arr: any[] = Array.isArray(data) ? data : (Array.isArray((data as any)?.items) ? (data as any).items : []);
+  if (!Array.isArray(arr) || arr.length === 0) throw new Error('JSON sin items.');
+
+  const payload = arr
+    .map((it) => {
+      const typology = String(it.typology || it.tipologia || '').trim();
+      const name = String(it.name || it.nombre || '').trim();
+      const unit = String(it.unit || it.unidad || 'Glb').trim();
+      if (!typology || !name) return null;
+
+      const materials = Array.isArray(it.materials) ? it.materials : [];
+      const normMaterials = materials
+        .map((m: any) => ({
+          name: String(m.name || m.nombre || '').trim(),
+          unit: String(m.unit || m.unidad || '').trim(),
+          quantityPerUnit: Number(m.quantityPerUnit ?? m.quantity_per_unit ?? m.cantidad_por_unidad ?? 0),
+          unitPrice: Number(m.unitPrice ?? m.unit_price ?? m.precio_unitario ?? 0),
+        }))
+        .filter((m: any) => m.name);
+
+      return {
+        org_id: orgId,
+        typology,
+        name,
+        name_norm: normalizeText(name),
+        unit,
+        labor_cost: Number(it.laborCost ?? it.labor_cost ?? it.mano_obra ?? 0) || 0,
+        equipment_cost: Number(it.equipmentCost ?? it.equipment_cost ?? it.equipo ?? 0) || 0,
+        materials: normMaterials,
+        meta: it.meta && typeof it.meta === 'object' ? it.meta : {},
+        currency: (it.currency || input.currency || null) ? String(it.currency || input.currency) : null,
+        source: (it.source || input.source || null) ? String(it.source || input.source) : null,
+        source_url: it.sourceUrl ? String(it.sourceUrl) : (input.sourceUrl ?? null),
+        effective_date: it.effectiveDate ? String(it.effectiveDate).slice(0, 10) : null,
+        last_refreshed_at: new Date().toISOString(),
+      };
+    })
+    .filter(Boolean) as any[];
+
+  if (payload.length === 0) throw new Error('No se encontraron plantillas APU válidas en el JSON.');
+
+  const upsert = await supabase
+    .from('apu_templates')
+    .upsert(payload, { onConflict: 'org_id,typology,name_norm' });
+
+  if (upsert.error) throw upsert.error;
+  return { templatesUpserted: payload.length };
+}
+
 export type ApuTemplateCsvImportInput = {
   url: string;
   source?: string;
