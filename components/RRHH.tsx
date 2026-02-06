@@ -337,9 +337,17 @@ const RRHH: React.FC<Props> = ({ projects, onListEmployees, onCreateEmployee, on
 
   const attendanceCenter = useMemo(() => {
     if (!attendanceRows || attendanceRows.length === 0) return null as [number, number] | null;
-    const r = attendanceRows.find((x: any) => x && x.location_lat != null && x.location_lng != null);
+    const r = attendanceRows.find((x: any) => {
+      if (!x) return false;
+      const lat = Number(x.location_lat);
+      const lng = Number(x.location_lng);
+      return Number.isFinite(lat) && Number.isFinite(lng);
+    });
     if (!r) return null;
-    return [Number(r.location_lat), Number(r.location_lng)] as [number, number];
+    const lat = Number(r.location_lat);
+    const lng = Number(r.location_lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    return [lat, lng] as [number, number];
   }, [attendanceRows]);
 
   const handleGenerateWorkerLink = async (employeeId: string, phone: string | null) => {
@@ -953,7 +961,12 @@ const RRHH: React.FC<Props> = ({ projects, onListEmployees, onCreateEmployee, on
               <MapContainer center={attendanceCenter} zoom={16} style={{ height: 320, width: '100%' }}>
                 <TileLayer attribution='&copy; OpenStreetMap contributors' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
                 {attendanceRows
-                  .filter((r: any) => r && r.location_lat != null && r.location_lng != null)
+                  .filter((r: any) => {
+                    if (!r) return false;
+                    const lat = Number(r.location_lat);
+                    const lng = Number(r.location_lng);
+                    return Number.isFinite(lat) && Number.isFinite(lng);
+                  })
                   .map((r: any) => (
                     <Marker key={String(r.id)} position={[Number(r.location_lat), Number(r.location_lng)]}>
                       <Popup>
