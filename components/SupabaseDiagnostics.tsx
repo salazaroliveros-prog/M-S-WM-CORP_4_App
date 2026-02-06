@@ -86,7 +86,7 @@ const SupabaseDiagnostics: React.FC<Props> = ({ orgId, enabled }) => {
     let requisitionId: string | null = null;
     let supplierId: string | null = null;
     let employeeId: string | null = null;
-    const contractRequestId = `SMOKE_CONTRACT_${stamp}`;
+    const contractRequestId = crypto.randomUUID();
     const attendanceToken = `SMOKE_TOKEN_${stamp}`;
     const workDate = new Date().toISOString().slice(0, 10);
 
