@@ -296,6 +296,22 @@ export async function deleteProject(orgId: string, projectId: string): Promise<v
 // Transactions
 // -----------------------------------------------------------------------------
 
+function fromDbTransaction(row: any): Transaction {
+  return {
+    id: String(row.id),
+    projectId: String(row.project_id),
+    type: row.type,
+    description: row.description ?? '',
+    amount: Number(row.amount ?? 0),
+    unit: row.unit ?? '',
+    cost: Number(row.cost ?? 0),
+    category: row.category ?? '',
+    date: row.occurred_at ? String(row.occurred_at) : new Date().toISOString(),
+    provider: row.provider ?? undefined,
+    rentEndDate: row.rent_end_date ?? undefined,
+  };
+}
+
 export async function createTransaction(orgId: string, tx: Transaction): Promise<void> {
   const supabase = getSupabaseClient();
 
@@ -320,6 +336,60 @@ export async function createTransaction(orgId: string, tx: Transaction): Promise
   });
 
   if (res.error) throw res.error;
+}
+
+export async function listTransactions(orgId: string, input?: { projectId?: string | null; limit?: number }): Promise<Transaction[]> {
+  const supabase = getSupabaseClient();
+
+  requireNonEmpty(orgId, 'orgId');
+  const limit = typeof input?.limit === 'number' && Number.isFinite(input.limit) ? Math.max(1, Math.floor(input.limit)) : 200;
+
+  let q = supabase
+    .from('transactions')
+    .select('*')
+    .eq('org_id', orgId)
+    .order('occurred_at', { ascending: false })
+    .limit(limit);
+
+  if (input?.projectId) {
+    q = q.eq('project_id', input.projectId);
+  }
+
+  const res = await q;
+  if (res.error) throw res.error;
+  return (res.data ?? []).map(fromDbTransaction);
+}
+
+export async function updateTransaction(
+  orgId: string,
+  transactionId: string,
+  patch: Partial<Pick<Transaction, 'description' | 'amount' | 'unit' | 'cost' | 'category' | 'date' | 'provider' | 'rentEndDate'>>
+): Promise<Transaction> {
+  const supabase = getSupabaseClient();
+
+  requireNonEmpty(orgId, 'orgId');
+  requireNonEmpty(transactionId, 'transactionId');
+
+  const payload: any = {};
+  if (patch.description !== undefined) payload.description = patch.description;
+  if (patch.amount !== undefined) payload.amount = patch.amount;
+  if (patch.unit !== undefined) payload.unit = patch.unit;
+  if (patch.cost !== undefined) payload.cost = patch.cost;
+  if (patch.category !== undefined) payload.category = patch.category;
+  if (patch.date !== undefined) payload.occurred_at = patch.date;
+  if (patch.provider !== undefined) payload.provider = patch.provider ?? null;
+  if (patch.rentEndDate !== undefined) payload.rent_end_date = patch.rentEndDate ?? null;
+
+  const res = await supabase
+    .from('transactions')
+    .update(payload)
+    .eq('org_id', orgId)
+    .eq('id', transactionId)
+    .select('*')
+    .single();
+
+  if (res.error) throw res.error;
+  return fromDbTransaction(res.data);
 }
 
 // -----------------------------------------------------------------------------
@@ -1215,6 +1285,26 @@ export async function listRequisitions(
     total: Number(r.total_amount ?? 0),
     status: r.status,
   }));
+}
+
+export async function updateRequisitionStatus(
+  orgId: string,
+  requisitionId: string,
+  status: 'draft' | 'sent' | 'done' | 'cancelled'
+): Promise<void> {
+  const supabase = getSupabaseClient();
+
+  requireNonEmpty(orgId, 'orgId');
+  requireNonEmpty(requisitionId, 'requisitionId');
+  requireNonEmpty(status, 'status');
+
+  const res = await supabase
+    .from('requisitions')
+    .update({ status })
+    .eq('org_id', orgId)
+    .eq('id', requisitionId);
+
+  if (res.error) throw res.error;
 }
 
 // -----------------------------------------------------------------------------
