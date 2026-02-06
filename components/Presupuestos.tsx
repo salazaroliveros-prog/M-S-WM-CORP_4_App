@@ -1473,9 +1473,10 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
   const handleExportCSV = () => {
     if (visibleBudgetLines.length === 0) return;
     
-    const headers = ['Renglon', 'Unidad', 'Cantidad', 'CostoDirecto'];
+    const headers = ['Techo', 'Renglon', 'Unidad', 'Cantidad', 'CostoDirecto'];
+    const roof = roofLabel(roofType);
     const rows = visibleBudgetLines.map(line => 
-      `"${line.name}","${line.unit}",${line.quantity},${line.directCost.toFixed(2)}`
+      `"${roof}","${line.name}","${line.unit}",${line.quantity},${line.directCost.toFixed(2)}`
     );
     const csvContent = [headers.join(','), ...rows].join('\n');
     
@@ -1483,7 +1484,8 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `presupuesto_${typology}_${new Date().toISOString().split('T')[0]}.csv`);
+    const roofSlug = roof.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9\-_]/g, '').slice(0, 30);
+    link.setAttribute('download', `presupuesto_${typology}_${roofSlug || 'sin-techo'}_${new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
