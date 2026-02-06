@@ -17,6 +17,14 @@ import {
   YAxis,
 } from 'recharts';
 import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabaseClient';
+import {
+  addWorkingDaysInclusive,
+  defaultWorkCalendarForYears,
+  nextWorkingDay,
+  parseIsoDateOnly,
+  toIsoDateKey,
+  workingDaysBetweenInclusive,
+} from '../lib/calendar';
 
 interface Props {
   projects: Project[];
@@ -59,6 +67,20 @@ type TxRow = {
   cost: number;
   category: string | null;
   occurred_at: string;
+};
+
+type GanttTask = {
+  key: string;
+  name: string;
+  unit: string;
+  qty: number;
+  durationDays: number;
+  start: string; // YYYY-MM-DD
+  end: string; // YYYY-MM-DD
+  slackDays: number;
+  isCritical: boolean;
+  barLeftPct: number;
+  barWidthPct: number;
 };
 
 const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null, onLoadBudget, onLoadProgress, onSaveProgress }) => {
@@ -413,6 +435,83 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
   }, [transactions, selectedProjectId]);
 
   const COLORS = ['#0ea5e9', '#22c55e', '#f59e0b', '#ef4444', '#7c3aed', '#64748b', '#111827'];
+
+  const gantt = useMemo(() => {
+    if (!selectedProjectId) return { tasks: [] as GanttTask[], start: null as string | null, end: null as string | null };
+    if (!selectedProject) return { tasks: [] as GanttTask[], start: null as string | null, end: null as string | null };
+    if (!budgetLines || budgetLines.length === 0) return { tasks: [] as GanttTask[], start: null as string | null, end: null as string | null };
+
+    const baseStart = parseIsoDateOnly(selectedProject.startDate) ?? new Date();
+
+    // Estimate duration from "labor effort". We only have laborCost (Q/unit), so we treat laborCost*qty as a proxy.
+    // Daily burn is a pragmatic default; can be refined later with crew/productivity models.
+    const DAILY_LABOR_BURN_Q = 1800;
+
+    // Pre-compute rough end year range to build holiday calendar.
+    const years = new Set<number>();
+    years.add(baseStart.getFullYear());
+    years.add(baseStart.getFullYear() + 1);
+    const cal = defaultWorkCalendarForYears(Array.from(years));
+
+    // Sequential dependencies by budget line order (as displayed/saved).
+    const rawTasks = budgetLines.map((bl, idx) => {
+      const qty = Number(bl.quantity) || 0;
+      const effortQ = Math.max(0, (Number(bl.laborCost) || 0) * Math.max(0, qty));
+      const duration = Math.max(1, Math.round(effortQ > 0 ? effortQ / DAILY_LABOR_BURN_Q : 1));
+      return {
+        idx,
+        key: `${idx}-${String(bl.id || bl.name)}`,
+        name: String(bl.name || ''),
+        unit: String(bl.unit || ''),
+        qty,
+        durationDays: duration,
+      };
+    });
+
+    let cursor = nextWorkingDay(baseStart, cal);
+    const scheduled: Array<Omit<GanttTask, 'slackDays' | 'isCritical' | 'barLeftPct' | 'barWidthPct'>> = [];
+    for (const t of rawTasks) {
+      const start = nextWorkingDay(cursor, cal);
+      const end = addWorkingDaysInclusive(start, t.durationDays, cal);
+      scheduled.push({
+        key: t.key,
+        name: t.name,
+        unit: t.unit,
+        qty: t.qty,
+        durationDays: t.durationDays,
+        start: toIsoDateKey(start),
+        end: toIsoDateKey(end),
+      });
+      cursor = new Date(end);
+      cursor.setDate(cursor.getDate() + 1);
+    }
+
+    const projectStart = scheduled[0]?.start ?? toIsoDateKey(baseStart);
+    const projectEnd = scheduled[scheduled.length - 1]?.end ?? projectStart;
+
+    const startDate = parseIsoDateOnly(projectStart) ?? baseStart;
+    const endDate = parseIsoDateOnly(projectEnd) ?? baseStart;
+    const totalWorking = Math.max(1, workingDaysBetweenInclusive(startDate, endDate, cal));
+
+    // With sequential dependencies, slack is 0 and the critical path includes all tasks.
+    const tasks: GanttTask[] = scheduled.map((t) => {
+      const tStart = parseIsoDateOnly(t.start) ?? startDate;
+      const tEnd = parseIsoDateOnly(t.end) ?? endDate;
+      const left = workingDaysBetweenInclusive(startDate, tStart, cal) - 1;
+      const width = workingDaysBetweenInclusive(tStart, tEnd, cal);
+      const barLeftPct = Math.max(0, Math.min(100, (left / totalWorking) * 100));
+      const barWidthPct = Math.max(0.5, Math.min(100, (width / totalWorking) * 100));
+      return {
+        ...t,
+        slackDays: 0,
+        isCritical: true,
+        barLeftPct,
+        barWidthPct,
+      };
+    });
+
+    return { tasks, start: projectStart, end: projectEnd };
+  }, [selectedProjectId, selectedProject, budgetLines]);
 
   const loadTransactions = async () => {
     setMetricsError(null);
@@ -935,6 +1034,70 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
             )}
           </div>
         </div>
+        </div>
+      )}
+
+      {selectedProject && (
+        <div className="bg-white p-6 rounded-xl shadow-md">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div>
+              <div className="font-bold text-navy-900">Cronograma (Gantt) por renglón</div>
+              <div className="text-xs text-gray-500">
+                Basado en renglones del presupuesto. Calendario: Lun–Sáb (Domingo no laborable) + feriados (por año) + Semana Santa.
+              </div>
+            </div>
+            {gantt.start && gantt.end && (
+              <div className="text-xs text-gray-600">
+                <div><span className="font-semibold">Inicio:</span> {gantt.start}</div>
+                <div><span className="font-semibold">Fin:</span> {gantt.end}</div>
+              </div>
+            )}
+          </div>
+
+          {gantt.tasks.length === 0 ? (
+            <div className="text-sm text-gray-500">
+              No hay renglones de presupuesto para generar el Gantt. Guarde el presupuesto en Presupuestos.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="rounded border overflow-hidden">
+                <div className="bg-gray-50 px-3 py-2 text-xs text-gray-600 grid grid-cols-12 gap-2">
+                  <div className="col-span-5 font-semibold">Renglón</div>
+                  <div className="col-span-2 font-semibold">Duración</div>
+                  <div className="col-span-2 font-semibold">Inicio</div>
+                  <div className="col-span-2 font-semibold">Fin</div>
+                  <div className="col-span-1 font-semibold text-right">Holg.</div>
+                </div>
+                {gantt.tasks.map((t) => (
+                  <div key={t.key} className="px-3 py-2 border-t grid grid-cols-12 gap-2 items-center">
+                    <div className="col-span-5">
+                      <div className="text-sm font-semibold text-navy-900">
+                        {t.name}
+                        {t.isCritical ? (
+                          <span className="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-red-100 text-red-700">CRÍTICO</span>
+                        ) : null}
+                      </div>
+                      <div className="text-[11px] text-gray-500">{t.qty ? `${Math.round(t.qty * 1000) / 1000} ${t.unit}` : t.unit}</div>
+                      <div className="mt-2 h-2 bg-gray-100 rounded relative overflow-hidden">
+                        <div
+                          className={t.isCritical ? 'absolute top-0 h-2 bg-navy-900 rounded' : 'absolute top-0 h-2 bg-mustard-500 rounded'}
+                          style={{ left: `${t.barLeftPct}%`, width: `${t.barWidthPct}%` }}
+                        />
+                      </div>
+                    </div>
+                    <div className="col-span-2 text-sm text-gray-700">{t.durationDays} día(s)</div>
+                    <div className="col-span-2 text-sm text-gray-700">{t.start}</div>
+                    <div className="col-span-2 text-sm text-gray-700">{t.end}</div>
+                    <div className="col-span-1 text-sm text-gray-700 text-right">{t.slackDays}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="text-xs text-gray-500">
+                Ruta crítica: dependencias secuenciales según el orden del presupuesto (holgura = 0). Para holguras reales se requieren dependencias/actividades paralelas definidas.
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
