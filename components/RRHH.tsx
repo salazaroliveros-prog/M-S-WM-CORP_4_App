@@ -8,6 +8,7 @@ import autoTable from 'jspdf-autotable';
 
 interface Props {
   projects: Project[];
+  syncVersion?: number;
   onListEmployees?: () => Promise<any[] | null>;
   onCreateEmployee?: (input: { name: string; dpi?: string; phone?: string; position: string; dailyRate: number; projectId?: string | null }) => Promise<any>;
   onListContracts?: () => Promise<any[] | null>;
@@ -109,6 +110,7 @@ const safeNumber = (v: any, fallback = 0) => {
 
 const RRHH: React.FC<Props> = ({
   projects,
+  syncVersion,
   onListEmployees,
   onCreateEmployee,
   onListContracts,
@@ -223,7 +225,7 @@ const RRHH: React.FC<Props> = ({
     return () => {
       cancelled = true;
     };
-  }, [onLoadPayRates]);
+  }, [onLoadPayRates, syncVersion]);
 
   useEffect(() => {
     if (!onLoadEmployeeRateOverrides) return;
@@ -242,7 +244,7 @@ const RRHH: React.FC<Props> = ({
     return () => {
       cancelled = true;
     };
-  }, [onLoadEmployeeRateOverrides]);
+  }, [onLoadEmployeeRateOverrides, syncVersion]);
 
   useEffect(() => {
     if (!onSavePayRates) return;
@@ -450,18 +452,18 @@ const RRHH: React.FC<Props> = ({
   useEffect(() => {
     refreshEmployees();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onListEmployees]);
+  }, [onListEmployees, syncVersion]);
 
   useEffect(() => {
     refreshContracts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onListContracts]);
+  }, [onListContracts, syncVersion]);
 
   useEffect(() => {
     if (activeTab !== 'ASISTENCIA') return;
     refreshAttendance();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, attendanceDate, onListAttendance]);
+  }, [activeTab, attendanceDate, onListAttendance, syncVersion]);
 
   const attendanceCenter = useMemo(() => {
     if (!attendanceRows || attendanceRows.length === 0) return null as [number, number] | null;

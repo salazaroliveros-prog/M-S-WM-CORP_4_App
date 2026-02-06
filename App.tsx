@@ -80,6 +80,8 @@ const App: React.FC = () => {
   });
   const useCloud = cloudMode === 'supabase';
 
+  const [cloudSyncVersion, setCloudSyncVersion] = useState(0);
+
   const scopeKey = useCloud && orgId ? `org_${orgId}` : 'local';
   const projectsCacheKey = (scope: string) => (scope === 'local' ? 'projects' : `wm_projects_v1_${scope}`);
   const lastCloudProjectsKey = () => 'wm_projects_v1_last_cloud';
@@ -172,6 +174,49 @@ const App: React.FC = () => {
       supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [useCloud, orgId]);
+
+  // Supabase Realtime: global data sync bump for other modules.
+  // This does not change UX; it only triggers background refreshes in modules.
+  useEffect(() => {
+    if (!useCloud || !orgId || !isSupabaseConfigured) return;
+
+    const supabase = getSupabaseClient();
+    let timer: number | null = null;
+
+    const bump = () => {
+      if (timer) window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        setCloudSyncVersion((v) => v + 1);
+      }, 300);
+    };
+
+    const channel = supabase
+      .channel(`app-sync:${orgId}`)
+      // Presupuestos
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'budgets', filter: `org_id=eq.${orgId}` }, bump)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'budget_lines', filter: `org_id=eq.${orgId}` }, bump)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'budget_line_materials', filter: `org_id=eq.${orgId}` }, bump)
+      // Compras
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'suppliers', filter: `org_id=eq.${orgId}` }, bump)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'requisitions', filter: `org_id=eq.${orgId}` }, bump)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'requisition_items', filter: `org_id=eq.${orgId}` }, bump)
+      // RRHH
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'employees', filter: `org_id=eq.${orgId}` }, bump)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'employee_contracts', filter: `org_id=eq.${orgId}` }, bump)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'org_pay_rates', filter: `org_id=eq.${orgId}` }, bump)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'employee_rate_overrides', filter: `org_id=eq.${orgId}` }, bump)
+      // Cotizador
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'service_quotes', filter: `org_id=eq.${orgId}` }, bump)
+      // Seguimiento
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'project_progress', filter: `org_id=eq.${orgId}` }, bump)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'project_progress_lines', filter: `org_id=eq.${orgId}` }, bump)
+      .subscribe();
+
+    return () => {
+      if (timer) window.clearTimeout(timer);
+      supabase.removeChannel(channel);
+    };
   }, [useCloud, orgId]);
 
   const handleCreateProject = async (partial: Partial<Project>) => {
@@ -891,6 +936,7 @@ const App: React.FC = () => {
               <Presupuestos 
                 projects={projects} 
                 initialProjectId={preselectedProjectId}
+                syncVersion={cloudSyncVersion}
                 onQuickBuy={handleQuickBuy}
                 onLoadBudget={handleLoadBudget}
                 onSaveBudget={handleSaveBudget}
@@ -908,6 +954,7 @@ const App: React.FC = () => {
                 projects={projects}
                 useCloud={useCloud}
                 orgId={orgId}
+                syncVersion={cloudSyncVersion}
                 onLoadBudget={handleLoadBudget}
                 onLoadProgress={handleLoadProgress}
                 onSaveProgress={handleSaveProgress}
@@ -917,6 +964,7 @@ const App: React.FC = () => {
               <Compras 
                 projects={projects} 
                 initialData={requisitionData}
+                syncVersion={cloudSyncVersion}
                 onLoadBudget={handleLoadBudget}
                 onCreateRequisition={handleCreateRequisition}
                 onListRequisitions={handleListRequisitions}
@@ -930,6 +978,7 @@ const App: React.FC = () => {
             {currentView === 'RRHH' && (
               <RRHH
                 projects={projects}
+                syncVersion={cloudSyncVersion}
                 onListEmployees={handleListEmployees}
                 onCreateEmployee={handleCreateEmployee}
                 onListContracts={handleListEmployeeContracts}
@@ -946,6 +995,7 @@ const App: React.FC = () => {
             {currentView === 'COTIZADOR' && (
               <Cotizador 
                 initialData={quoteInitialData} 
+                syncVersion={cloudSyncVersion}
                 onListQuotes={handleListServiceQuotes}
                 onUpsertQuote={handleUpsertServiceQuote}
                 onDeleteQuote={handleDeleteServiceQuote}

@@ -2,6 +2,7 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { QUOTE_SERVICES } from '../constants';
 import { QuoteInitialData } from '../types';
 import { Share2, Printer, Save, Trash2, RotateCcw } from 'lucide-react';
+import jsPDF from 'jspdf';
 
 type ServiceQuote = {
   id: string;
@@ -19,6 +20,7 @@ type ServiceQuote = {
 
 interface Props {
   initialData?: QuoteInitialData | null;
+  syncVersion?: number;
   onListQuotes?: () => Promise<ServiceQuote[]>;
   onUpsertQuote?: (input: {
     id?: string | null;
@@ -34,7 +36,7 @@ interface Props {
   onDeleteQuote?: (quoteId: string) => Promise<void>;
 }
 
-const Cotizador: React.FC<Props> = ({ initialData, onListQuotes, onUpsertQuote, onDeleteQuote }) => {
+const Cotizador: React.FC<Props> = ({ initialData, syncVersion, onListQuotes, onUpsertQuote, onDeleteQuote }) => {
   const [client, setClient] = useState('');
   const [phone, setPhone] = useState('');
   const [selectedService, setSelectedService] = useState('');
@@ -74,23 +76,140 @@ const Cotizador: React.FC<Props> = ({ initialData, onListQuotes, onUpsertQuote, 
     if (!onListQuotes) return;
     refreshHistory();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canUseHistory]);
+  }, [canUseHistory, syncVersion]);
 
   const serviceData = useMemo(() => QUOTE_SERVICES.find(s => s.name === selectedService), [selectedService]);
   const total = serviceData ? serviceData.price * quantity : 0;
 
-  const handleSend = () => {
+  const buildQuotePdf = () => {
+    const doc = new jsPDF({ orientation: 'p', unit: 'pt', format: 'a4' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+
+    const padX = 48;
+    let y = 56;
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(18);
+    doc.text('CONSTRUCTORA WM/M&S', padX, y);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(90);
+    doc.text('Barrio El Centro, Quesada Jutiapa', pageWidth - padX, y - 10, { align: 'right' });
+    doc.text('Tel: 55606172', pageWidth - padX, y + 2, { align: 'right' });
+    doc.text('multiserviciosdeguatemal@gmail.com', pageWidth - padX, y + 14, { align: 'right' });
+
+    y += 36;
+    doc.setDrawColor(220);
+    doc.line(padX, y, pageWidth - padX, y);
+
+    y += 28;
+    doc.setTextColor(20);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text('COTIZACIÓN DE SERVICIOS', pageWidth / 2, y, { align: 'center' });
+
+    y += 26;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(40);
+
+    const safe = (v: string) => String(v || '').trim();
+    const row = (label: string, value: string) => {
+      doc.setFont('helvetica', 'bold');
+      doc.text(label, padX, y);
+      doc.setFont('helvetica', 'normal');
+      doc.text(value || '-', padX + 120, y);
+      y += 16;
+    };
+
+    const now = new Date();
+    row('Fecha:', `${now.toLocaleDateString('es-GT')} ${now.toLocaleTimeString('es-GT')}`);
+    row('Cliente:', safe(client));
+    row('Teléfono:', safe(phone));
+    row('Dirección:', safe(address) || '-');
+
+    y += 10;
+    doc.setDrawColor(235);
+    doc.line(padX, y, pageWidth - padX, y);
+    y += 22;
+
+    const unit = serviceData?.unit || '';
+    const unitPrice = Number(serviceData?.price ?? 0) || 0;
+    const qty = Number(quantity) || 0;
+
+    row('Servicio:', safe(selectedService));
+    row('Cantidad:', `${qty} ${unit}`.trim());
+    row('Precio Unit:', `Q${unitPrice.toFixed(2)}${unit ? `/${unit}` : ''}`);
+
+    y += 10;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    doc.setTextColor(0);
+    doc.text(`TOTAL ESTIMADO: Q${total.toFixed(2)}`, padX, y);
+
+    return doc;
+  };
+
+  const downloadPdf = (blob: Blob, fileName: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const handleSend = async () => {
     if (!client || !phone || !selectedService) {
       alert('Por favor complete los campos obligatorios (Cliente, Teléfono, Servicio).');
       return;
     }
-    const message = `Hola ${client}, aquí está su cotización de ${selectedService}. Total estimado: Q${total.toFixed(2)}.`;
-    const whatsappUrl = `https://wa.me/${phone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
-    window.open(whatsappUrl, '_blank');
+
+    try {
+      const doc = buildQuotePdf();
+      const blob = doc.output('blob') as Blob;
+      const digits = phone.replace(/\D/g, '');
+      const fileName = `Cotizacion_${String(client || 'Cliente').replace(/\s+/g, '_')}_${digits || 'sin_numero'}.pdf`;
+      const file = new File([blob], fileName, { type: 'application/pdf' });
+
+      const canShareFiles =
+        typeof navigator !== 'undefined' &&
+        typeof (navigator as any).share === 'function' &&
+        (typeof (navigator as any).canShare !== 'function' || (navigator as any).canShare({ files: [file] }));
+
+      if (canShareFiles) {
+        await (navigator as any).share({
+          title: 'Cotización de servicios',
+          files: [file],
+        });
+        return;
+      }
+
+      // Fallback: at least generate the PDF file for the user to attach manually.
+      downloadPdf(blob, fileName);
+      alert('PDF generado. Adjunte el archivo en WhatsApp manualmente (su navegador no permite compartir archivos directamente).');
+    } catch (e: any) {
+      alert(String(e?.message ?? e ?? 'No se pudo generar/compartir el PDF.'));
+    }
   };
 
   const handlePrint = () => {
-    window.print();
+    if (!client || !phone || !selectedService) {
+      alert('Por favor complete los campos obligatorios (Cliente, Teléfono, Servicio).');
+      return;
+    }
+    try {
+      const doc = buildQuotePdf();
+      const blob = doc.output('blob') as Blob;
+      const digits = phone.replace(/\D/g, '');
+      const fileName = `Cotizacion_${String(client || 'Cliente').replace(/\s+/g, '_')}_${digits || 'sin_numero'}.pdf`;
+      downloadPdf(blob, fileName);
+    } catch (e: any) {
+      alert(String(e?.message ?? e ?? 'No se pudo generar el PDF.'));
+    }
   };
 
   const resetForm = () => {

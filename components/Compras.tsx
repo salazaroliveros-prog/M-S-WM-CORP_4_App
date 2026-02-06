@@ -5,6 +5,7 @@ import { ShoppingCart, Send, Plus, Trash2, ClipboardList, X } from 'lucide-react
 interface Props {
   projects: Project[];
   initialData?: RequisitionData | null;
+  syncVersion?: number;
   onLoadBudget?: (projectId: string) => Promise<{ lines: BudgetLine[] } | null>;
   onCreateRequisition?: (data: RequisitionData, supplierName: string | null) => Promise<void>;
   onListRequisitions?: () => Promise<Array<{ id: string; projectId: string | null; requestedAt: string; supplierName?: string | null; supplierNote?: string | null; total: number; status: string }>>;
@@ -146,6 +147,7 @@ const buildRequisitionMessage = (input: {
 const Compras: React.FC<Props> = ({
   projects,
   initialData,
+  syncVersion,
   onLoadBudget,
   onCreateRequisition,
   onListRequisitions,
@@ -189,7 +191,7 @@ const Compras: React.FC<Props> = ({
     (async () => {
       try {
         const rows = await onListSuppliers();
-        if (cancelled) return;
+            if (cancelled) return;
         const list = Array.isArray(rows) ? rows : [];
         if (list.length > 0) {
           const hydrated: Supplier[] = list
@@ -243,7 +245,7 @@ const Compras: React.FC<Props> = ({
     return () => {
       cancelled = true;
     };
-  }, [onListSuppliers, onUpsertSupplier, defaultSuppliers]);
+    }, [onListSuppliers, onUpsertSupplier, defaultSuppliers, syncVersion]);
 
   useEffect(() => {
     try {
@@ -431,7 +433,7 @@ const Compras: React.FC<Props> = ({
     return () => {
       cancelled = true;
     };
-  }, [onListRequisitions]);
+  }, [onListRequisitions, syncVersion]);
 
   const handleUpdateQuantity = (index: number, val: number) => {
     setOrderItems(prev => {

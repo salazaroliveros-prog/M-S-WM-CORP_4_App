@@ -17,6 +17,7 @@ import {
 interface Props {
   projects: Project[];
   initialProjectId?: string;
+  syncVersion?: number;
   onQuickBuy?: (data: RequisitionData) => void;
   onLoadBudget?: (projectId: string) => Promise<{ typology?: string; indirectPct: string; lines: BudgetLine[] } | null>;
   onSaveBudget?: (projectId: string, typology: string, indirectPct: string, lines: BudgetLine[]) => Promise<void>;
@@ -29,7 +30,7 @@ interface Props {
   onImportApuTemplatesJsonText?: (input: { jsonText: string; source?: string; currency?: string; sourceUrl?: string | null }) => Promise<{ templatesUpserted: number }>;
 }
 
-const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy, onLoadBudget, onSaveBudget, onImportMaterialPrices, onImportMaterialPricesText, onSuggestLineFromCatalog, onImportApuTemplates, onImportApuTemplatesCsv, onImportApuTemplatesCsvText }) => {
+const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion, onQuickBuy, onLoadBudget, onSaveBudget, onImportMaterialPrices, onImportMaterialPricesText, onSuggestLineFromCatalog, onImportApuTemplates, onImportApuTemplatesCsv, onImportApuTemplatesCsvText }) => {
   const [selectedProjectId, setSelectedProjectId] = useState(initialProjectId || '');
   const [typology, setTypology] = useState<Typology | ''>('');
   const [budgetLines, setBudgetLines] = useState<BudgetLine[]>([]);
@@ -39,6 +40,30 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
   const [indirectCostPercentageStr, setIndirectCostPercentageStr] = useState<string>("35"); // Default to 35% as string for better input handling
   const [apuSummaryOpen, setApuSummaryOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const lastLoadedSnapshotRef = useRef<string>('');
+  const [isDirty, setIsDirty] = useState(false);
+
+  const snapshot = () => {
+    try {
+      return JSON.stringify({
+        selectedProjectId,
+        typology: String(typology || ''),
+        indirectPct: String(indirectCostPercentageStr || ''),
+        lines: budgetLines,
+      });
+    } catch {
+      return '';
+    }
+  };
+
+  useEffect(() => {
+    const last = lastLoadedSnapshotRef.current;
+    if (!last) return;
+    const now = snapshot();
+    setIsDirty(now !== last);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [budgetLines, typology, indirectCostPercentageStr, selectedProjectId]);
 
   const [customLineOpen, setCustomLineOpen] = useState(false);
   const [customLineName, setCustomLineName] = useState('');
@@ -170,6 +195,14 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
           }
           setBudgetLines(loaded.lines);
           setIndirectCostPercentageStr(loaded.indirectPct);
+          // mark clean after applying remote state
+          lastLoadedSnapshotRef.current = JSON.stringify({
+            selectedProjectId,
+            typology: String((loaded.typology ?? '') || ''),
+            indirectPct: String(loaded.indirectPct || ''),
+            lines: loaded.lines,
+          });
+          setIsDirty(false);
           setImportStatus({ type: 'info', message: 'Presupuesto cargado desde Supabase.' });
         }
       } catch (e: any) {
@@ -182,6 +215,44 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
       cancelled = true;
     };
   }, [onLoadBudget, selectedProjectId]);
+
+  // Realtime sync: reload budget when remote changes, but do not overwrite local edits.
+  useEffect(() => {
+    if (!onLoadBudget) return;
+    if (!selectedProjectId) return;
+    if (!syncVersion) return;
+    if (isDirty) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const loaded = await onLoadBudget(selectedProjectId);
+        if (cancelled) return;
+        if (loaded) {
+          const t = String(loaded.typology ?? '').trim();
+          if (t === 'RESIDENCIAL' || t === 'COMERCIAL' || t === 'INDUSTRIAL' || t === 'CIVIL' || t === 'PUBLICA') {
+            setTypology(t as Typology);
+          }
+          setBudgetLines(loaded.lines);
+          setIndirectCostPercentageStr(loaded.indirectPct);
+          lastLoadedSnapshotRef.current = JSON.stringify({
+            selectedProjectId,
+            typology: String((loaded.typology ?? '') || ''),
+            indirectPct: String(loaded.indirectPct || ''),
+            lines: loaded.lines,
+          });
+          setIsDirty(false);
+        }
+      } catch {
+        // ignore
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncVersion]);
 
   const handleSaveBudget = async () => {
     if (!onSaveBudget) {
@@ -205,6 +276,13 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
           }
           setBudgetLines(loaded.lines);
           setIndirectCostPercentageStr(loaded.indirectPct);
+          lastLoadedSnapshotRef.current = JSON.stringify({
+            selectedProjectId,
+            typology: String((loaded.typology ?? '') || ''),
+            indirectPct: String(loaded.indirectPct || ''),
+            lines: loaded.lines,
+          });
+          setIsDirty(false);
         }
       }
     } catch (e: any) {

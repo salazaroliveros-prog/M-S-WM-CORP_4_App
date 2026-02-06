@@ -49,6 +49,7 @@ interface Props {
 const SupabaseDiagnostics: React.FC<Props> = ({ orgId, enabled }) => {
   const [steps, setSteps] = useState<Step[]>([
     { key: 'projects', title: 'Proyectos: crear / listar / actualizar / borrar', status: 'pending' },
+    { key: 'realtime', title: 'Realtime: recibe eventos (transactions)', status: 'pending' },
     { key: 'audit', title: 'Auditoría: registra cambios (admin)', status: 'pending' },
     { key: 'budgets', title: 'Presupuestos: guardar / cargar', status: 'pending' },
     { key: 'progress', title: 'Seguimiento: guardar / cargar', status: 'pending' },
@@ -88,6 +89,7 @@ const SupabaseDiagnostics: React.FC<Props> = ({ orgId, enabled }) => {
     let requisitionId: string | null = null;
     let supplierId: string | null = null;
     let employeeId: string | null = null;
+    let testTxId: string | null = null;
     const contractRequestId = crypto.randomUUID();
     const attendanceToken = `SMOKE_TOKEN_${stamp}`;
     const workDate = new Date().toISOString().slice(0, 10);
@@ -115,6 +117,59 @@ const SupabaseDiagnostics: React.FC<Props> = ({ orgId, enabled }) => {
       await updateProject(orgId, projectId, { location: 'SMOKE_TEST Ubicación (edit)' } as any);
 
       setStep('projects', { status: 'ok', detail: `projectId=${projectId}` });
+
+      // 1.2) Realtime
+      setStep('realtime', { status: 'running' });
+      try {
+        testTxId = crypto.randomUUID();
+        const channel = supabase.channel(`diag-realtime:${orgId}:${testTxId}`);
+
+        const waitForInsert = new Promise<void>((resolve, reject) => {
+          const timeout = window.setTimeout(() => {
+            reject(
+              new Error(
+                'No llegó evento Realtime (timeout). Revise Database → Replication → Realtime (o publicación supabase_realtime) para la tabla transactions.'
+              )
+            );
+          }, 6000);
+
+          channel.on(
+            'postgres_changes',
+            { event: 'INSERT', schema: 'public', table: 'transactions', filter: `org_id=eq.${orgId}` },
+            (payload: any) => {
+              const id = payload?.new?.id ? String(payload.new.id) : '';
+              if (id && id === testTxId) {
+                window.clearTimeout(timeout);
+                resolve();
+              }
+            }
+          );
+        });
+
+        const subStatus = await new Promise<string>((resolve) => {
+          channel.subscribe((s: any) => resolve(String(s || 'unknown')));
+        });
+
+        // Insert a known transaction id (so we can detect it and clean it up)
+        await supabase.from('transactions').insert({
+          id: testTxId,
+          org_id: orgId,
+          project_id: projectId,
+          type: 'GASTO',
+          description: `SMOKE_TEST realtime ${stamp}`,
+          amount: 1,
+          unit: 'u',
+          cost: 1,
+          category: 'SMOKE_TEST',
+          occurred_at: new Date().toISOString(),
+        });
+
+        await waitForInsert;
+        setStep('realtime', { status: 'ok', detail: `Evento INSERT recibido (subscribe=${subStatus})` });
+        supabase.removeChannel(channel);
+      } catch (e: any) {
+        setStep('realtime', { status: 'fail', detail: safeMsg(e) });
+      }
 
       // 1.5) Audit logs
       setStep('audit', { status: 'running' });
@@ -255,6 +310,11 @@ const SupabaseDiagnostics: React.FC<Props> = ({ orgId, enabled }) => {
 
       // 7) Cleanup
       setStep('cleanup', { status: 'running' });
+
+      // transactions
+      if (testTxId) {
+        await supabase.from('transactions').delete().eq('org_id', orgId).eq('id', testTxId);
+      }
 
       // attendance + tokens
       await supabase.from('attendance').delete().eq('org_id', orgId).eq('employee_id', employeeId).eq('work_date', workDate);

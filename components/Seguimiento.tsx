@@ -30,6 +30,7 @@ interface Props {
   projects: Project[];
   useCloud?: boolean;
   orgId?: string | null;
+  syncVersion?: number;
   onLoadBudget?: (projectId: string) => Promise<{ typology?: string; indirectPct: string; lines: BudgetLine[] } | null>;
   onLoadProgress?: (projectId: string) => Promise<ProjectProgressPayload | null>;
   onSaveProgress?: (projectId: string, payload: ProjectProgressPayload) => Promise<void>;
@@ -83,11 +84,71 @@ type GanttTask = {
   barWidthPct: number;
 };
 
-const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null, onLoadBudget, onLoadProgress, onSaveProgress }) => {
+const SNAP_PCT = 5;
+const LEFT_PCT_CLASSES = [
+  'left-[0%]',
+  'left-[5%]',
+  'left-[10%]',
+  'left-[15%]',
+  'left-[20%]',
+  'left-[25%]',
+  'left-[30%]',
+  'left-[35%]',
+  'left-[40%]',
+  'left-[45%]',
+  'left-[50%]',
+  'left-[55%]',
+  'left-[60%]',
+  'left-[65%]',
+  'left-[70%]',
+  'left-[75%]',
+  'left-[80%]',
+  'left-[85%]',
+  'left-[90%]',
+  'left-[95%]',
+  'left-[100%]',
+];
+
+const WIDTH_PCT_CLASSES = [
+  'w-[0%]',
+  'w-[5%]',
+  'w-[10%]',
+  'w-[15%]',
+  'w-[20%]',
+  'w-[25%]',
+  'w-[30%]',
+  'w-[35%]',
+  'w-[40%]',
+  'w-[45%]',
+  'w-[50%]',
+  'w-[55%]',
+  'w-[60%]',
+  'w-[65%]',
+  'w-[70%]',
+  'w-[75%]',
+  'w-[80%]',
+  'w-[85%]',
+  'w-[90%]',
+  'w-[95%]',
+  'w-[100%]',
+];
+
+const clampPct = (n: number) => Math.max(0, Math.min(100, Number.isFinite(n) ? n : 0));
+
+const snapPct = (n: number) => {
+  const v = clampPct(n);
+  return Math.max(0, Math.min(100, Math.round(v / SNAP_PCT) * SNAP_PCT));
+};
+
+const leftPctClass = (pct: number) => LEFT_PCT_CLASSES[Math.round(snapPct(pct) / SNAP_PCT)] ?? 'left-[0%]';
+const widthPctClass = (pct: number) => WIDTH_PCT_CLASSES[Math.round(snapPct(pct) / SNAP_PCT)] ?? 'w-[0%]';
+
+const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null, syncVersion, onLoadBudget, onLoadProgress, onSaveProgress }) => {
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [budgetLines, setBudgetLines] = useState<BudgetLine[]>([]);
   const [budgetIndirectPct, setBudgetIndirectPct] = useState<string>('0');
   const [progressLines, setProgressLines] = useState<ProgressLineState[]>([]);
+  const [isDirty, setIsDirty] = useState(false);
   const [status, setStatus] = useState<ProgressStatus>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [summaryByProjectId, setSummaryByProjectId] = useState<Record<string, number>>({});
@@ -97,6 +158,7 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
   const [transactions, setTransactions] = useState<TxRow[]>([]);
   const [metricsError, setMetricsError] = useState<string | null>(null);
   const refreshTimer = useRef<number | null>(null);
+  const prevSelectedProjectIdRef = useRef<string>('');
 
   const allProjects = useMemo(() => projects.slice(), [projects]);
   const projectsByCreated = useMemo(() => projects.slice(), [projects]);
@@ -188,7 +250,17 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
       setBudgetLines([]);
       setBudgetIndirectPct('0');
       setProgressLines([]);
+      setIsDirty(false);
+      prevSelectedProjectIdRef.current = '';
       setStatus(null);
+      return;
+    }
+
+    const isSameProject = prevSelectedProjectIdRef.current === selectedProjectId;
+    prevSelectedProjectIdRef.current = selectedProjectId;
+
+    if (isSameProject && isDirty) {
+      setStatus({ type: 'info', message: 'Hay cambios sin guardar. No se actualizó automáticamente.' });
       return;
     }
 
@@ -249,6 +321,7 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
         }
 
         setProgressLines(nextProgress);
+        setIsDirty(false);
 
         if (loadedLines.length === 0 && !saved?.lines?.length) {
           setStatus({ type: 'info', message: 'No hay presupuesto guardado para este proyecto. Genere/guarde el presupuesto en Presupuestos.' });
@@ -268,9 +341,10 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
     return () => {
       cancelled = true;
     };
-  }, [selectedProjectId, onLoadBudget, onLoadProgress]);
+  }, [selectedProjectId, onLoadBudget, onLoadProgress, syncVersion, isDirty]);
 
   const handleChangeCompleted = (key: string, value: number) => {
+    setIsDirty(true);
     setProgressLines((prev) =>
       prev.map((l) => {
         if (l.key !== key) return l;
@@ -282,6 +356,7 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
   };
 
   const handleChangeNotes = (key: string, value: string) => {
+    setIsDirty(true);
     setProgressLines((prev) => prev.map((l) => (l.key === key ? { ...l, notes: value } : l)));
   };
 
@@ -316,6 +391,7 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
         saveProgressLocal(selectedProjectId, payload);
       }
       setStatus({ type: 'success', message: 'Avance guardado.' });
+      setIsDirty(false);
       setSummaryByProjectId((prev) => ({ ...prev, [selectedProjectId]: computeOverallPct(progressLines) }));
     } catch (e: any) {
       setStatus({ type: 'error', message: e?.message || 'Error guardando avance' });
@@ -737,6 +813,13 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeProjects.length]);
+
+  // Refresh global summary on cross-device changes.
+  useEffect(() => {
+    if (activeProjects.length === 0) return;
+    if (!selectedProjectId) loadSummary();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncVersion]);
 
   return (
     <div className="space-y-6">
@@ -1206,8 +1289,12 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
                       <div className="text-[11px] text-gray-500">{t.qty ? `${Math.round(t.qty * 1000) / 1000} ${t.unit}` : t.unit}</div>
                       <div className="mt-2 h-2 bg-gray-100 rounded relative overflow-hidden">
                         <div
-                          className={t.isCritical ? 'absolute top-0 h-2 bg-navy-900 rounded' : 'absolute top-0 h-2 bg-mustard-500 rounded'}
-                          style={{ left: `${t.barLeftPct}%`, width: `${t.barWidthPct}%` }}
+                          className={
+                            (t.isCritical ? 'absolute top-0 h-2 bg-navy-900 rounded ' : 'absolute top-0 h-2 bg-mustard-500 rounded ') +
+                            leftPctClass(t.barLeftPct) +
+                            ' ' +
+                            widthPctClass(t.barWidthPct)
+                          }
                         />
                       </div>
                     </div>
