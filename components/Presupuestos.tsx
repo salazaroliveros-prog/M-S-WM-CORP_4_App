@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Project, BudgetLine, Typology, MaterialItem, RequisitionData } from '../types';
 import { DEFAULT_BUDGET_LINES, calculateAPU } from '../constants';
-import { Printer, Save, RefreshCw, Upload, Download, AlertTriangle, CheckCircle, ChevronDown, ChevronUp, Plus, Trash2, Calculator, ShoppingCart, ArrowRight, X, List } from 'lucide-react';
+import { Printer, Save, RefreshCw, Upload, Download, AlertTriangle, CheckCircle, ChevronDown, ChevronUp, ChevronLeft, Plus, Trash2, Calculator, ShoppingCart, ArrowRight, X, List } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import {
@@ -18,7 +18,7 @@ interface Props {
   projects: Project[];
   initialProjectId?: string;
   onQuickBuy?: (data: RequisitionData) => void;
-  onLoadBudget?: (projectId: string) => Promise<{ indirectPct: string; lines: BudgetLine[] } | null>;
+  onLoadBudget?: (projectId: string) => Promise<{ typology?: string; indirectPct: string; lines: BudgetLine[] } | null>;
   onSaveBudget?: (projectId: string, typology: string, indirectPct: string, lines: BudgetLine[]) => Promise<void>;
   onImportMaterialPrices?: (input: { url: string; vendor: string; currency: string }) => Promise<{ materialsUpserted: number; quotesUpserted: number }>;
   onImportMaterialPricesText?: (input: { csvText: string; vendor: string; currency: string }) => Promise<{ materialsUpserted: number; quotesUpserted: number }>;
@@ -37,6 +37,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
   const [expandedLineId, setExpandedLineId] = useState<string | null>(null);
   const [reportLine, setReportLine] = useState<BudgetLine | null>(null); // State for the report modal
   const [indirectCostPercentageStr, setIndirectCostPercentageStr] = useState<string>("35"); // Default to 35% as string for better input handling
+  const [apuSummaryOpen, setApuSummaryOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [customLineOpen, setCustomLineOpen] = useState(false);
@@ -59,6 +60,27 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
   const [apuImportFormat, setApuImportFormat] = useState<'json' | 'csv'>('csv');
   const [apuImportMode, setApuImportMode] = useState<'file' | 'url'>('file');
   const [apuImportFile, setApuImportFile] = useState<File | null>(null);
+
+  const cloneMaterials = (materials: MaterialItem[] | undefined | null): MaterialItem[] => {
+    if (!Array.isArray(materials)) return [];
+    return materials.map((m) => ({
+      name: String(m?.name ?? ''),
+      unit: String(m?.unit ?? ''),
+      quantityPerUnit: Number(m?.quantityPerUnit ?? 0),
+      unitPrice: Number(m?.unitPrice ?? 0),
+    }));
+  };
+
+  const makeLineId = (prefix: string) => {
+    try {
+      if (typeof crypto !== 'undefined' && typeof (crypto as any).randomUUID === 'function') {
+        return `${prefix}-${(crypto as any).randomUUID()}`;
+      }
+    } catch {
+      // ignore
+    }
+    return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  };
 
   const toPublicGoogleSheetsCsvUrl = (u: string): string => {
     const url = (u || '').trim();
@@ -121,13 +143,13 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
   useEffect(() => {
     const project = projects.find(p => p.id === selectedProjectId);
     if (project) {
-      if (project.typology !== typology) {
-          setBudgetLines([]); // Reset lines when typology changes
-      }
       setTypology(project.typology);
+      setBudgetLines([]);
+      setExpandedLineId(null);
     } else {
         setTypology('');
         setBudgetLines([]);
+        setExpandedLineId(null);
     }
   }, [selectedProjectId, projects]);
 
@@ -142,6 +164,10 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
         const loaded = await onLoadBudget(selectedProjectId);
         if (cancelled) return;
         if (loaded) {
+          const t = String(loaded.typology ?? '').trim();
+          if (t === 'RESIDENCIAL' || t === 'COMERCIAL' || t === 'INDUSTRIAL' || t === 'CIVIL' || t === 'PUBLICA') {
+            setTypology(t as Typology);
+          }
           setBudgetLines(loaded.lines);
           setIndirectCostPercentageStr(loaded.indirectPct);
           setImportStatus({ type: 'info', message: 'Presupuesto cargado desde Supabase.' });
@@ -173,6 +199,10 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
       if (onLoadBudget) {
         const loaded = await onLoadBudget(selectedProjectId);
         if (loaded) {
+          const t = String(loaded.typology ?? '').trim();
+          if (t === 'RESIDENCIAL' || t === 'COMERCIAL' || t === 'INDUSTRIAL' || t === 'CIVIL' || t === 'PUBLICA') {
+            setTypology(t as Typology);
+          }
           setBudgetLines(loaded.lines);
           setIndirectCostPercentageStr(loaded.indirectPct);
         }
@@ -561,6 +591,134 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
         foot: [[{ content: 'COSTO DIRECTO TOTAL', colSpan: 5, styles: { halign: 'right', fontStyle: 'bold' } }, { content: fmtMoney(safeNum(totalDirectCost)), styles: { halign: 'right', fontStyle: 'bold' } }]],
       });
 
+      // Materials breakdown (two formats)
+      const afterLinesY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 18 : afterTopY + 200;
+
+      const ensureRoom = (y: number, need: number) => {
+        if (pageHeight - y < need) {
+          doc.addPage();
+          return 92;
+        }
+        return y;
+      };
+
+      // 1) Grouped by line (readability)
+      let groupedTitleY = ensureRoom(afterLinesY, 120);
+      doc.setTextColor(17, 24, 39);
+      doc.setFontSize(11);
+      doc.text('Desglose de materiales por renglón', 40, groupedTitleY);
+
+      const groupedBody: any[] = [];
+      for (const line of budgetLines) {
+        const mats = Array.isArray(line.materials) ? line.materials : [];
+        if (mats.length === 0) continue;
+
+        const cap = getChapterNumber(String(line.name || ''));
+        const qtyLine = safeNum(line.quantity);
+        const unitLine = String(line.unit || '');
+        groupedBody.push([
+          {
+            content: `${cap ? `Cap. ${cap} - ` : ''}${String(line.name || '')}  (Cant: ${qtyLine.toFixed(2)} ${unitLine})`,
+            colSpan: 5,
+            styles: { fillColor: [17, 24, 39], textColor: [255, 255, 255], fontStyle: 'bold' },
+          },
+        ]);
+
+        for (const m of mats) {
+          const mName = String(m?.name ?? '');
+          const mUnit = String(m?.unit ?? '');
+          const qtyPer = safeNum(m?.quantityPerUnit);
+          const qtyTotal = qtyPer * qtyLine;
+          const unitPrice = safeNum(m?.unitPrice);
+          const cost = qtyTotal * unitPrice;
+          groupedBody.push([mName, mUnit, qtyTotal.toFixed(3), fmtMoney(unitPrice), fmtMoney(cost)]);
+        }
+      }
+
+      autoTable(doc, {
+        startY: groupedTitleY + 10,
+        theme: 'grid',
+        head: [['Material', 'Unidad', 'Cant. total', 'Precio unit.', 'Costo']],
+        body: groupedBody.length > 0 ? groupedBody : [[{ content: 'Sin materiales', colSpan: 5 }]],
+        styles: { fontSize: 8, cellPadding: 3, overflow: 'linebreak' },
+        headStyles: { fillColor: [243, 244, 246], textColor: [17, 24, 39] },
+        columnStyles: {
+          0: { cellWidth: 250 },
+          1: { cellWidth: 52 },
+          2: { cellWidth: 70, halign: 'right' },
+          3: { cellWidth: 70, halign: 'right' },
+          4: { cellWidth: 70, halign: 'right', fontStyle: 'bold' },
+        },
+        margin: { left: 40, right: 40 },
+        foot: [[{ content: 'TOTAL MATERIALES', colSpan: 4, styles: { halign: 'right', fontStyle: 'bold' } }, { content: fmtMoney(costParts.materials), styles: { halign: 'right', fontStyle: 'bold' } }]],
+      });
+
+      // 2) Consolidated table grouped by material (summed)
+      const afterGroupedY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 18 : groupedTitleY + 180;
+      let flatTitleY = ensureRoom(afterGroupedY, 120);
+      doc.setTextColor(17, 24, 39);
+      doc.setFontSize(11);
+      doc.text('Materiales consolidados (agrupados y sumados)', 40, flatTitleY);
+
+      const normMat = (s: string) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+      const matAgg = new Map<
+        string,
+        {
+          name: string;
+          unit: string;
+          unitPrice: number;
+          qtyTotal: number;
+          costTotal: number;
+        }
+      >();
+
+      for (const line of budgetLines) {
+        const qtyLine = safeNum(line.quantity);
+        const mats = Array.isArray(line.materials) ? line.materials : [];
+        for (const m of mats) {
+          const name = String(m?.name ?? '').trim();
+          if (!name) continue;
+          const unit = String(m?.unit ?? '').trim();
+          const qtyPer = safeNum(m?.quantityPerUnit);
+          const qtyTotal = qtyPer * qtyLine;
+          const unitPrice = safeNum(m?.unitPrice);
+          const cost = qtyTotal * unitPrice;
+
+          // Grouping rule: same material name + unit + unit price.
+          // (If the same material has multiple prices, it will appear in multiple rows.)
+          const key = `${normMat(name)}||${normMat(unit)}||${unitPrice.toFixed(6)}`;
+          const prev = matAgg.get(key);
+          if (!prev) {
+            matAgg.set(key, { name, unit, unitPrice, qtyTotal, costTotal: cost });
+          } else {
+            prev.qtyTotal += qtyTotal;
+            prev.costTotal += cost;
+          }
+        }
+      }
+
+      const materialRows = [...matAgg.values()]
+        .sort((a, b) => b.costTotal - a.costTotal)
+        .map((m) => [m.name, m.unit, m.qtyTotal.toFixed(3), fmtMoney(m.unitPrice), fmtMoney(m.costTotal)]);
+
+      autoTable(doc, {
+        startY: flatTitleY + 10,
+        theme: 'grid',
+        head: [['Material', 'Unidad', 'Cant. total', 'Precio unit.', 'Costo']],
+        body: materialRows.length > 0 ? materialRows : [[{ content: 'Sin materiales', colSpan: 5 }]],
+        styles: { fontSize: 7.5, cellPadding: 3, overflow: 'linebreak' },
+        headStyles: { fillColor: [243, 244, 246], textColor: [17, 24, 39] },
+        columnStyles: {
+          0: { cellWidth: 290 },
+          1: { cellWidth: 52 },
+          2: { cellWidth: 70, halign: 'right' },
+          3: { cellWidth: 70, halign: 'right' },
+          4: { cellWidth: 70, halign: 'right', fontStyle: 'bold' },
+        },
+        margin: { left: 40, right: 40 },
+        foot: [[{ content: 'TOTAL MATERIALES', colSpan: 4, styles: { halign: 'right', fontStyle: 'bold' } }, { content: fmtMoney(costParts.materials), styles: { halign: 'right', fontStyle: 'bold' } }]],
+      });
+
       const fileName = `Reporte-Ejecutivo-${sanitizeFileName(project.name)}-${now.toISOString().slice(0, 10)}.pdf`;
       const blobUrl = doc.output('bloburl');
       const opened = window.open(blobUrl, '_blank', 'noopener,noreferrer');
@@ -631,7 +789,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
           unit: String((suggestion as any).unit ?? line.unit),
           laborCost: Number((suggestion as any).laborCost ?? line.laborCost ?? 0),
           equipmentCost: Number((suggestion as any).equipmentCost ?? line.equipmentCost ?? 0),
-          materials: Array.isArray((suggestion as any).materials) ? [...((suggestion as any).materials as any[])] : line.materials,
+          materials: Array.isArray((suggestion as any).materials) ? cloneMaterials(((suggestion as any).materials as any[])) : cloneMaterials(line.materials),
         };
         next.directCost = calculateLineTotal(next);
         updatedCount++;
@@ -712,7 +870,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
     const nextItem = masterList[nextIndex];
     if (nextItem) {
         const newLine: BudgetLine = {
-            id: `line-${Date.now()}-${nextIndex}`,
+        id: makeLineId('line'),
             projectId: selectedProjectId,
             name: nextItem.name || 'Renglón sin nombre',
             unit: nextItem.unit || 'Glb',
@@ -720,7 +878,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
             directCost: 0,
             laborCost: nextItem.laborCost || 0,
             equipmentCost: nextItem.equipmentCost || 0,
-            materials: nextItem.materials ? [...nextItem.materials] : []
+        materials: cloneMaterials(nextItem.materials as any)
         };
 
         // Auto-fill from locally downloaded library (offline-first).
@@ -731,7 +889,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
             newLine.laborCost = Number((offline as any).laborCost ?? newLine.laborCost ?? 0);
             newLine.equipmentCost = Number((offline as any).equipmentCost ?? newLine.equipmentCost ?? 0);
             if (Array.isArray((offline as any).materials)) {
-              newLine.materials = [...((offline as any).materials as MaterialItem[])];
+              newLine.materials = cloneMaterials(((offline as any).materials as MaterialItem[]));
             }
           }
         } catch {
@@ -789,7 +947,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
         unit: line.unit,
         laborCost: line.laborCost,
         equipmentCost: line.equipmentCost,
-        materials: line.materials,
+        materials: cloneMaterials(line.materials),
         savedAt: new Date().toISOString(),
       };
       const next = [template, ...existing].slice(0, 50);
@@ -852,7 +1010,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
     }
 
     const newLine: BudgetLine = {
-      id: `custom-${Date.now()}`,
+      id: makeLineId('custom'),
       projectId: selectedProjectId,
       name: customLineName.trim(),
       unit: (customLineUnit || base.unit || 'Glb') as string,
@@ -860,7 +1018,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
       directCost: 0,
       laborCost: Number((base as any).laborCost ?? 0),
       equipmentCost: Number((base as any).equipmentCost ?? 0),
-      materials: (base as any).materials ? [...((base as any).materials as MaterialItem[])] : [],
+      materials: cloneMaterials((base as any).materials as any),
     };
 
     // Pre-calculate like other lines
@@ -1216,7 +1374,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
         }
 
         newLines.push({
-          id: `imported-${Date.now()}-${i}`,
+          id: makeLineId('imported'),
           projectId: selectedProjectId || 'temp-import-placeholder',
           name: name,
           unit: unit,
@@ -1269,6 +1427,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
 
   const handleDeleteLine = (id: string) => {
       setBudgetLines(prev => prev.filter(l => l.id !== id));
+      setExpandedLineId((cur) => (cur === id ? null : cur));
   };
 
   // Recalculate totals automatically when lines change
@@ -2099,11 +2258,6 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
           <div className="p-6 bg-gray-50 border-t border-gray-200">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               <div className="space-y-4">
-                 <h4 className="font-bold text-lg mb-2">Resumen APU (Global)</h4>
-                 <div className="flex justify-between text-sm">
-                   <span>Costo Directo Total:</span>
-                   <span className="font-mono">Q{totalDirectCost.toFixed(2)}</span>
-                 </div>
                  <div className="flex justify-between text-sm text-gray-600 items-center">
                    <div className="flex items-center gap-2">
                      <span>Costos Indirectos (%):</span>
@@ -2118,21 +2272,40 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
                        onKeyDown={preventNegativeInput}
                        onChange={(e) => setIndirectCostPercentageStr(e.target.value)}
                      />
+                     <button
+                       type="button"
+                       onClick={() => setApuSummaryOpen((v) => !v)}
+                       className="p-1 rounded border bg-white hover:bg-gray-50"
+                       aria-label={apuSummaryOpen ? 'Ocultar resumen APU' : 'Mostrar resumen APU'}
+                       title={apuSummaryOpen ? 'Ocultar resumen' : 'Mostrar resumen'}
+                     >
+                       <ChevronLeft size={16} className={apuSummaryOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
+                     </button>
                    </div>
                    <span className="font-mono">Q{indirectCost.toFixed(2)}</span>
                  </div>
-                 <div className="flex justify-between text-sm text-gray-600">
-                   <span>Subtotal (Precio Venta sin IVA):</span>
-                   <span className="font-mono">Q{priceNoTax.toFixed(2)}</span>
-                 </div>
-                 <div className="flex justify-between text-sm text-gray-600">
-                   <span>IVA (12%):</span>
-                   <span className="font-mono">Q{tax.toFixed(2)}</span>
-                 </div>
-                 <div className="flex justify-between text-xl font-bold text-navy-900 border-t pt-2 border-gray-300">
-                   <span>Precio Final:</span>
-                   <span>Q{finalPrice.toFixed(2)}</span>
-                 </div>
+
+                 {apuSummaryOpen && (
+                   <>
+                     <h4 className="font-bold text-lg mb-2">Resumen APU (Global)</h4>
+                     <div className="flex justify-between text-sm">
+                       <span>Costo Directo Total:</span>
+                       <span className="font-mono">Q{totalDirectCost.toFixed(2)}</span>
+                     </div>
+                     <div className="flex justify-between text-sm text-gray-600">
+                       <span>Subtotal (Precio Venta sin IVA):</span>
+                       <span className="font-mono">Q{priceNoTax.toFixed(2)}</span>
+                     </div>
+                     <div className="flex justify-between text-sm text-gray-600">
+                       <span>IVA (12%):</span>
+                       <span className="font-mono">Q{tax.toFixed(2)}</span>
+                     </div>
+                     <div className="flex justify-between text-xl font-bold text-navy-900 border-t pt-2 border-gray-300">
+                       <span>Precio Final:</span>
+                       <span>Q{finalPrice.toFixed(2)}</span>
+                     </div>
+                   </>
+                 )}
               </div>
 
               <div className="flex flex-col justify-end space-y-2">

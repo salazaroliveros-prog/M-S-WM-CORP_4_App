@@ -1,4 +1,4 @@
-import type { BudgetLine, MaterialItem, Project, Transaction } from '../types';
+import type { AuditLog, BudgetLine, MaterialItem, Project, Transaction } from '../types';
 import { getSupabaseClient } from './supabaseClient';
 
 export type DbMode = 'supabase' | 'local';
@@ -232,6 +232,27 @@ export async function getOrCreateOrgId(orgName = defaultOrgName()): Promise<stri
   return created.data.id as string;
 }
 
+export async function getMyOrgRole(orgId: string): Promise<'owner' | 'admin' | 'member' | null> {
+  const supabase = getSupabaseClient();
+  requireNonEmpty(orgId, 'orgId');
+
+  const userRes = await supabase.auth.getUser();
+  const userId = userRes.data.user?.id;
+  if (!userId) return null;
+
+  const res = await supabase
+    .from('org_members')
+    .select('role')
+    .eq('org_id', orgId)
+    .eq('user_id', userId)
+    .limit(1);
+
+  if (res.error) throw res.error;
+  const role = res.data && res.data.length > 0 ? String((res.data[0] as any).role) : '';
+  if (role === 'owner' || role === 'admin' || role === 'member') return role;
+  return null;
+}
+
 // -----------------------------------------------------------------------------
 // Projects
 // -----------------------------------------------------------------------------
@@ -393,10 +414,56 @@ export async function updateTransaction(
 }
 
 // -----------------------------------------------------------------------------
+// Audit logs (enterprise traceability)
+// -----------------------------------------------------------------------------
+
+function fromDbAuditLog(row: any): AuditLog {
+  return {
+    id: String(row.id),
+    orgId: String(row.org_id),
+    projectId: row.project_id ? String(row.project_id) : null,
+    actorUserId: String(row.actor_user_id),
+    action: String(row.action),
+    tableName: String(row.table_name),
+    recordId: row.record_id ? String(row.record_id) : null,
+    oldSnapshot: row.old_snapshot ?? undefined,
+    newSnapshot: row.new_snapshot ?? undefined,
+    createdAt: String(row.created_at),
+  };
+}
+
+export async function listAuditLogs(
+  orgId: string,
+  input?: { limit?: number; projectId?: string | null; tableName?: string | null }
+): Promise<AuditLog[]> {
+  const supabase = getSupabaseClient();
+
+  requireNonEmpty(orgId, 'orgId');
+  const limit = typeof input?.limit === 'number' && Number.isFinite(input.limit) ? Math.max(1, Math.floor(input.limit)) : 100;
+
+  let q = supabase
+    .from('audit_logs')
+    .select('*')
+    .eq('org_id', orgId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (input?.projectId) q = q.eq('project_id', input.projectId);
+  if (input?.tableName) q = q.eq('table_name', input.tableName);
+
+  const res = await q;
+  if (res.error) throw res.error;
+  return (res.data ?? []).map(fromDbAuditLog);
+}
+
+// -----------------------------------------------------------------------------
 // Budgets
 // -----------------------------------------------------------------------------
 
-export async function loadBudgetForProject(orgId: string, projectId: string): Promise<{ indirectPct: string; lines: BudgetLine[] } | null> {
+export async function loadBudgetForProject(
+  orgId: string,
+  projectId: string
+): Promise<{ typology: string; indirectPct: string; lines: BudgetLine[] } | null> {
   const supabase = getSupabaseClient();
 
   requireNonEmpty(orgId, 'orgId');
@@ -461,6 +528,7 @@ export async function loadBudgetForProject(orgId: string, projectId: string): Pr
   }));
 
   return {
+    typology: String(budgetRes.data.typology ?? ''),
     indirectPct: String(budgetRes.data.indirect_pct ?? 35),
     lines,
   };
@@ -1229,16 +1297,20 @@ export async function createRequisition(
   if (supplierNameTrimmed) notesParts.push(`Proveedor sugerido: ${supplierNameTrimmed}`);
   if (sourceLineName && String(sourceLineName).trim()) notesParts.push(`Renglón presupuesto: ${String(sourceLineName).trim()}`);
 
+  // Create as draft first so the creator can insert items, then transition to 'sent'
+  // (policies can disallow item edits after sending).
+  const initialStatus: 'draft' = 'draft';
+
   const req = await supabase
     .from('requisitions')
     .insert({
       org_id: orgId,
       project_id: projectId,
       supplier_id: supplierId,
-      status,
+      status: initialStatus,
       notes: notesParts.length > 0 ? notesParts.join('\n') : null,
       source_budget_line_id: sourceBudgetLineId,
-      sent_at: status === 'sent' ? new Date().toISOString() : null,
+      sent_at: null,
     })
     .select('id')
     .single();
@@ -1257,6 +1329,10 @@ export async function createRequisition(
 
     const ins = await supabase.from('requisition_items').insert(payload);
     if (ins.error) throw ins.error;
+  }
+
+  if (status === 'sent') {
+    await updateRequisitionStatus(orgId, reqId, 'sent');
   }
 }
 
@@ -1290,7 +1366,7 @@ export async function listRequisitions(
 export async function updateRequisitionStatus(
   orgId: string,
   requisitionId: string,
-  status: 'draft' | 'sent' | 'done' | 'cancelled'
+  status: 'draft' | 'sent' | 'confirmed' | 'received' | 'cancelled'
 ): Promise<void> {
   const supabase = getSupabaseClient();
 
@@ -1304,6 +1380,100 @@ export async function updateRequisitionStatus(
     .eq('org_id', orgId)
     .eq('id', requisitionId);
 
+  if (res.error) throw res.error;
+}
+
+// -----------------------------------------------------------------------------
+// Suppliers (Compras)
+// -----------------------------------------------------------------------------
+
+export type SupplierRecord = {
+  id: string;
+  name: string;
+  phone: string | null;
+  whatsapp: string | null;
+  email: string | null;
+  notes: string | null;
+  defaultNoteTemplate: string | null;
+  termsTemplate: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+const fromDbSupplier = (r: any): SupplierRecord => ({
+  id: String(r.id),
+  name: String(r.name ?? ''),
+  phone: r.phone ? String(r.phone) : null,
+  whatsapp: r.whatsapp ? String(r.whatsapp) : null,
+  email: r.email ? String(r.email) : null,
+  notes: r.notes ? String(r.notes) : null,
+  defaultNoteTemplate: r.default_note_template ? String(r.default_note_template) : null,
+  termsTemplate: r.terms_template ? String(r.terms_template) : null,
+  createdAt: String(r.created_at ?? new Date().toISOString()),
+  updatedAt: String(r.updated_at ?? new Date().toISOString()),
+});
+
+export async function listSuppliers(orgId: string, limit = 100): Promise<SupplierRecord[]> {
+  const supabase = getSupabaseClient();
+  requireNonEmpty(orgId, 'orgId');
+  const safeLimit = typeof limit === 'number' && Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : 100;
+
+  const res = await supabase
+    .from('suppliers')
+    .select('*')
+    .eq('org_id', orgId)
+    .order('updated_at', { ascending: false })
+    .limit(safeLimit);
+
+  if (res.error) throw res.error;
+  return (res.data ?? []).map(fromDbSupplier);
+}
+
+export async function upsertSupplier(
+  orgId: string,
+  input: {
+    id?: string | null;
+    name: string;
+    phone?: string | null;
+    whatsapp?: string | null;
+    email?: string | null;
+    notes?: string | null;
+    defaultNoteTemplate?: string | null;
+    termsTemplate?: string | null;
+  }
+): Promise<SupplierRecord> {
+  const supabase = getSupabaseClient();
+  requireNonEmpty(orgId, 'orgId');
+  requireNonEmpty(input?.name, 'name');
+
+  const payload: any = {
+    org_id: orgId,
+    name: String(input.name).trim(),
+    phone: input.phone ?? null,
+    whatsapp: input.whatsapp ?? null,
+    email: input.email ?? null,
+    notes: input.notes ?? null,
+    default_note_template: input.defaultNoteTemplate ?? null,
+    terms_template: input.termsTemplate ?? null,
+  };
+  if (input.id) payload.id = input.id;
+
+  const res = await supabase
+    .from('suppliers')
+    .upsert(payload, { onConflict: 'id' })
+    .select('*')
+    .single();
+
+  if (res.error) throw res.error;
+  return fromDbSupplier(res.data);
+}
+
+export async function deleteSupplier(orgId: string, supplierId: string): Promise<void> {
+  const supabase = getSupabaseClient();
+  requireNonEmpty(orgId, 'orgId');
+  requireNonEmpty(supplierId, 'supplierId');
+
+  const res = await supabase.from('suppliers').delete().eq('org_id', orgId).eq('id', supplierId);
   if (res.error) throw res.error;
 }
 
@@ -1349,6 +1519,103 @@ export async function createEmployee(orgId: string, input: { name: string; dpi?:
 
   if (res.error) throw res.error;
   return res.data;
+}
+
+// -----------------------------------------------------------------------------
+// RRHH Settings (pay rates + overrides)
+// -----------------------------------------------------------------------------
+
+export type OrgPayRatesRecord = Record<string, number>;
+
+export async function listOrgPayRates(orgId: string): Promise<OrgPayRatesRecord> {
+  const supabase = getSupabaseClient();
+  requireNonEmpty(orgId, 'orgId');
+
+  const res = await supabase
+    .from('org_pay_rates')
+    .select('role, daily_rate')
+    .eq('org_id', orgId);
+
+  if (res.error) throw res.error;
+
+  const out: OrgPayRatesRecord = {};
+  for (const r of res.data ?? []) {
+    const role = String((r as any).role ?? '').trim();
+    if (!role) continue;
+    out[role] = Number((r as any).daily_rate ?? 0);
+  }
+  return out;
+}
+
+export async function upsertOrgPayRates(orgId: string, payRates: OrgPayRatesRecord): Promise<void> {
+  const supabase = getSupabaseClient();
+  requireNonEmpty(orgId, 'orgId');
+  if (!payRates || typeof payRates !== 'object') throw new Error('payRates inválido.');
+
+  const payload = Object.entries(payRates)
+    .map(([role, rate]) => ({
+      org_id: orgId,
+      role: String(role).trim(),
+      daily_rate: Number(rate ?? 0),
+    }))
+    .filter((r) => r.role && Number.isFinite(r.daily_rate));
+
+  if (payload.length === 0) return;
+  const res = await supabase.from('org_pay_rates').upsert(payload, { onConflict: 'org_id,role' });
+  if (res.error) throw res.error;
+}
+
+export async function listEmployeeRateOverrides(orgId: string): Promise<Record<string, number>> {
+  const supabase = getSupabaseClient();
+  requireNonEmpty(orgId, 'orgId');
+
+  const res = await supabase
+    .from('employee_rate_overrides')
+    .select('employee_id, daily_rate')
+    .eq('org_id', orgId);
+
+  if (res.error) throw res.error;
+  const out: Record<string, number> = {};
+  for (const r of res.data ?? []) {
+    const id = String((r as any).employee_id ?? '').trim();
+    if (!id) continue;
+    out[id] = Number((r as any).daily_rate ?? 0);
+  }
+  return out;
+}
+
+export async function upsertEmployeeRateOverride(orgId: string, employeeId: string, dailyRate: number): Promise<void> {
+  const supabase = getSupabaseClient();
+  requireNonEmpty(orgId, 'orgId');
+  requireNonEmpty(employeeId, 'employeeId');
+  requireFiniteNumber(dailyRate, 'dailyRate');
+
+  const res = await supabase
+    .from('employee_rate_overrides')
+    .upsert(
+      {
+        org_id: orgId,
+        employee_id: employeeId,
+        daily_rate: dailyRate,
+      },
+      { onConflict: 'org_id,employee_id' }
+    );
+
+  if (res.error) throw res.error;
+}
+
+export async function deleteEmployeeRateOverride(orgId: string, employeeId: string): Promise<void> {
+  const supabase = getSupabaseClient();
+  requireNonEmpty(orgId, 'orgId');
+  requireNonEmpty(employeeId, 'employeeId');
+
+  const res = await supabase
+    .from('employee_rate_overrides')
+    .delete()
+    .eq('org_id', orgId)
+    .eq('employee_id', employeeId);
+
+  if (res.error) throw res.error;
 }
 
 // -----------------------------------------------------------------------------
@@ -1426,6 +1693,127 @@ export async function upsertEmployeeContract(
   return res.data;
 }
 
+export async function submitEmployeeContractResponsePublic(input: { requestId: string; response: any }): Promise<any> {
+  const supabase = getSupabaseClient();
+  requireNonEmpty(input?.requestId, 'requestId');
+  if (input?.response == null) throw new Error('response requerido.');
+
+  const res = await supabase.rpc('submit_employee_contract_response', {
+    p_request_id: input.requestId,
+    p_response: input.response,
+  });
+  if (res.error) throw res.error;
+  const data = res.data as any;
+  if (Array.isArray(data)) return data[0] ?? null;
+  return data;
+}
+
+// -----------------------------------------------------------------------------
+// Cotizador: Service quote history
+// -----------------------------------------------------------------------------
+
+export type ServiceQuoteRecord = {
+  id: string;
+  client: string;
+  phone: string | null;
+  address: string | null;
+  serviceName: string;
+  quantity: number;
+  unit: string | null;
+  unitPrice: number | null;
+  total: number | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+const fromDbServiceQuote = (r: any): ServiceQuoteRecord => ({
+  id: String(r.id),
+  client: String(r.client ?? ''),
+  phone: r.phone ? String(r.phone) : null,
+  address: r.address ? String(r.address) : null,
+  serviceName: String(r.service_name ?? ''),
+  quantity: Number(r.quantity ?? 0),
+  unit: r.unit ? String(r.unit) : null,
+  unitPrice: r.unit_price == null ? null : Number(r.unit_price),
+  total: r.total == null ? null : Number(r.total),
+  createdAt: String(r.created_at ?? new Date().toISOString()),
+  updatedAt: String(r.updated_at ?? new Date().toISOString()),
+});
+
+export async function listServiceQuotes(orgId: string, input?: { limit?: number; phone?: string | null }): Promise<ServiceQuoteRecord[]> {
+  const supabase = getSupabaseClient();
+  requireNonEmpty(orgId, 'orgId');
+
+  const limit = typeof input?.limit === 'number' && Number.isFinite(input.limit) ? Math.max(1, Math.floor(input.limit)) : 50;
+  const phoneDigits = input?.phone ? String(input.phone).replace(/\D/g, '') : '';
+
+  let q = supabase
+    .from('service_quotes')
+    .select('*')
+    .eq('org_id', orgId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (phoneDigits) q = q.eq('phone', phoneDigits);
+
+  const res = await q;
+  if (res.error) throw res.error;
+  return (res.data ?? []).map(fromDbServiceQuote);
+}
+
+export async function upsertServiceQuote(
+  orgId: string,
+  input: {
+    id?: string | null;
+    client: string;
+    phone?: string | null;
+    address?: string | null;
+    serviceName: string;
+    quantity: number;
+    unit?: string | null;
+    unitPrice?: number | null;
+    total?: number | null;
+  }
+): Promise<ServiceQuoteRecord> {
+  const supabase = getSupabaseClient();
+  requireNonEmpty(orgId, 'orgId');
+  requireNonEmpty(input?.client, 'client');
+  requireNonEmpty(input?.serviceName, 'serviceName');
+  requireFiniteNumber(input?.quantity, 'quantity');
+
+  const phoneDigits = input.phone ? String(input.phone).replace(/\D/g, '') : null;
+
+  const payload: any = {
+    org_id: orgId,
+    client: String(input.client).trim(),
+    phone: phoneDigits,
+    address: input.address ? String(input.address) : null,
+    service_name: String(input.serviceName).trim(),
+    quantity: Number(input.quantity),
+    unit: input.unit ? String(input.unit) : null,
+    unit_price: input.unitPrice == null ? null : Number(input.unitPrice),
+    total: input.total == null ? null : Number(input.total),
+  };
+  if (input.id) payload.id = input.id;
+
+  const res = await supabase
+    .from('service_quotes')
+    .upsert(payload, { onConflict: 'id' })
+    .select('*')
+    .single();
+
+  if (res.error) throw res.error;
+  return fromDbServiceQuote(res.data);
+}
+
+export async function deleteServiceQuote(orgId: string, quoteId: string): Promise<void> {
+  const supabase = getSupabaseClient();
+  requireNonEmpty(orgId, 'orgId');
+  requireNonEmpty(quoteId, 'quoteId');
+  const res = await supabase.from('service_quotes').delete().eq('org_id', orgId).eq('id', quoteId);
+  if (res.error) throw res.error;
+}
+
 // -----------------------------------------------------------------------------
 // Attendance (GPS + biometric payload)
 // -----------------------------------------------------------------------------
@@ -1498,7 +1886,9 @@ export async function submitAttendanceWithToken(input: {
   }
   const res = await supabase.rpc('submit_attendance_with_token', args);
   if (res.error) rethrowAttendanceRpcError(res.error, 'No se pudo registrar la asistencia');
-  return res.data;
+  const data = res.data as any;
+  if (Array.isArray(data)) return data[0] ?? null;
+  return data;
 }
 
 export async function listAttendanceForDate(orgId: string, workDate: string): Promise<any[]> {

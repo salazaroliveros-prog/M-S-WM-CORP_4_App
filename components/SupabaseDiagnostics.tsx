@@ -7,6 +7,7 @@ import {
   deleteProject,
   listProjects,
   updateProject,
+  listAuditLogs,
   loadBudgetForProject,
   saveBudgetForProject,
   loadProgressForProject,
@@ -48,6 +49,7 @@ interface Props {
 const SupabaseDiagnostics: React.FC<Props> = ({ orgId, enabled }) => {
   const [steps, setSteps] = useState<Step[]>([
     { key: 'projects', title: 'Proyectos: crear / listar / actualizar / borrar', status: 'pending' },
+    { key: 'audit', title: 'Auditoría: registra cambios (admin)', status: 'pending' },
     { key: 'budgets', title: 'Presupuestos: guardar / cargar', status: 'pending' },
     { key: 'progress', title: 'Seguimiento: guardar / cargar', status: 'pending' },
     { key: 'compras', title: 'Compras: requisición guardar / listar', status: 'pending' },
@@ -113,6 +115,17 @@ const SupabaseDiagnostics: React.FC<Props> = ({ orgId, enabled }) => {
       await updateProject(orgId, projectId, { location: 'SMOKE_TEST Ubicación (edit)' } as any);
 
       setStep('projects', { status: 'ok', detail: `projectId=${projectId}` });
+
+      // 1.5) Audit logs
+      setStep('audit', { status: 'running' });
+      try {
+        const logs = await listAuditLogs(orgId, { limit: 50, tableName: 'projects' });
+        const found = logs.some((l) => String(l.recordId || '') === projectId);
+        if (!found) throw new Error('No se encontró auditoría para el proyecto creado/editado');
+        setStep('audit', { status: 'ok', detail: `rows=${logs.length}` });
+      } catch (e: any) {
+        setStep('audit', { status: 'fail', detail: safeMsg(e) });
+      }
 
       // 2) Budgets
       setStep('budgets', { status: 'running' });

@@ -5,6 +5,7 @@ import { isSupabaseConfigured, getSupabaseClient } from './lib/supabaseClient';
 import {
   ensureSupabaseSession,
   getOrCreateOrgId,
+  getMyOrgRole,
   listProjects,
   createProject as dbCreateProject,
   updateProject as dbUpdateProject,
@@ -23,12 +24,24 @@ import {
   importApuTemplatesFromCsvText,
   createRequisition,
   listRequisitions,
+  updateRequisitionStatus,
   listEmployees,
   createEmployee,
   listEmployeeContracts,
   upsertEmployeeContract,
   listAttendanceForDate,
   setEmployeeAttendanceToken,
+  listSuppliers as dbListSuppliers,
+  upsertSupplier as dbUpsertSupplier,
+  deleteSupplier as dbDeleteSupplier,
+  listOrgPayRates as dbListOrgPayRates,
+  upsertOrgPayRates as dbUpsertOrgPayRates,
+  listEmployeeRateOverrides as dbListEmployeeRateOverrides,
+  upsertEmployeeRateOverride as dbUpsertEmployeeRateOverride,
+  deleteEmployeeRateOverride as dbDeleteEmployeeRateOverride,
+  listServiceQuotes as dbListServiceQuotes,
+  upsertServiceQuote as dbUpsertServiceQuote,
+  deleteServiceQuote as dbDeleteServiceQuote,
 } from './lib/db';
 
 // Components
@@ -54,6 +67,7 @@ const App: React.FC = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const [orgId, setOrgId] = useState<string | null>(null);
+  const [canApproveRequisitions, setCanApproveRequisitions] = useState(false);
   const [cloudError, setCloudError] = useState<string | null>(null);
   const [cloudMode, setCloudMode] = useState<'supabase' | 'local'>(() => (isSupabaseConfigured ? 'supabase' : 'local'));
   const [isCloudInitInFlight, setIsCloudInitInFlight] = useState(false);
@@ -75,6 +89,7 @@ const App: React.FC = () => {
   const progressCompatKey = (projectId: string) => `wm_progress_v1_${projectId}`;
   const requisitionsCacheKey = (scope: string) => `wm_requisitions_v1_${scope}`;
   const txCacheKey = (scope: string) => `wm_transactions_v1_${scope}`;
+  const serviceQuotesCacheKey = (scope: string) => `wm_service_quotes_v1_${scope}`;
 
   const safeJsonParse = <T,>(raw: string | null): T | null => {
     if (!raw) return null;
@@ -227,7 +242,11 @@ const App: React.FC = () => {
     const readLocal = () => {
       const cached = safeJsonParse<any>(localStorage.getItem(budgetCacheKey(scopeKey, projectId)));
       if (cached && Array.isArray(cached.lines)) {
-        return { indirectPct: String(cached.indirectPct ?? '35'), lines: cached.lines };
+        return {
+          typology: typeof cached.typology === 'string' ? cached.typology : undefined,
+          indirectPct: String(cached.indirectPct ?? '35'),
+          lines: cached.lines,
+        };
       }
       return null;
     };
@@ -317,6 +336,139 @@ const App: React.FC = () => {
     } catch (e: any) {
       throw new Error(`Avance guardado local, pero falló Supabase: ${e?.message || 'error desconocido'}`);
     }
+  };
+
+  // ---------------------------------------------------------------------------
+  // Compras: suppliers CRUD (cloud only)
+  // ---------------------------------------------------------------------------
+
+  const handleListSuppliers = async () => {
+    if (!useCloud || !orgId) return null;
+    const rows = await dbListSuppliers(orgId, 200);
+    return rows.map((s) => ({
+      id: s.id,
+      name: s.name,
+      phone: s.phone,
+      whatsapp: s.whatsapp,
+      defaultNoteTemplate: s.defaultNoteTemplate,
+      termsTemplate: s.termsTemplate,
+    }));
+  };
+
+  const handleUpsertSupplier = async (input: { id?: string | null; name: string; whatsapp?: string | null; phone?: string | null; defaultNoteTemplate?: string | null; termsTemplate?: string | null }) => {
+    if (!useCloud || !orgId) return null;
+    const row = await dbUpsertSupplier(orgId, {
+      id: input.id ?? null,
+      name: input.name,
+      whatsapp: input.whatsapp ?? null,
+      phone: input.phone ?? null,
+      defaultNoteTemplate: input.defaultNoteTemplate ?? null,
+      termsTemplate: input.termsTemplate ?? null,
+    });
+    return { id: row.id };
+  };
+
+  const handleDeleteSupplier = async (supplierId: string) => {
+    if (!useCloud || !orgId) return;
+    await dbDeleteSupplier(orgId, supplierId);
+  };
+
+  // ---------------------------------------------------------------------------
+  // RRHH: pay rates + overrides (cloud only)
+  // ---------------------------------------------------------------------------
+
+  const handleLoadPayRates = async () => {
+    if (!useCloud || !orgId) return null;
+    return await dbListOrgPayRates(orgId);
+  };
+
+  const handleSavePayRates = async (payRates: Record<string, number>) => {
+    if (!useCloud || !orgId) return;
+    await dbUpsertOrgPayRates(orgId, payRates);
+  };
+
+  const handleLoadEmployeeRateOverrides = async () => {
+    if (!useCloud || !orgId) return null;
+    return await dbListEmployeeRateOverrides(orgId);
+  };
+
+  const handleUpsertEmployeeRateOverride = async (employeeId: string, dailyRate: number) => {
+    if (!useCloud || !orgId) return;
+    await dbUpsertEmployeeRateOverride(orgId, employeeId, dailyRate);
+  };
+
+  const handleDeleteEmployeeRateOverride = async (employeeId: string) => {
+    if (!useCloud || !orgId) return;
+    await dbDeleteEmployeeRateOverride(orgId, employeeId);
+  };
+
+  // ---------------------------------------------------------------------------
+  // Cotizador: service quotes (offline-first)
+  // ---------------------------------------------------------------------------
+
+  const handleListServiceQuotes = async () => {
+    const readLocal = () => {
+      const cached = safeJsonParse<any[]>(localStorage.getItem(serviceQuotesCacheKey(scopeKey)));
+      return Array.isArray(cached) ? cached : [];
+    };
+
+    if (!useCloud || !orgId) return readLocal();
+
+    try {
+      const remote = await dbListServiceQuotes(orgId, { limit: 50 });
+      try {
+        localStorage.setItem(serviceQuotesCacheKey(scopeKey), JSON.stringify(remote));
+      } catch {}
+      return remote;
+    } catch {
+      return readLocal();
+    }
+  };
+
+  const handleUpsertServiceQuote = async (input: any) => {
+    const localRows = (() => {
+      const cached = safeJsonParse<any[]>(localStorage.getItem(serviceQuotesCacheKey(scopeKey)));
+      return Array.isArray(cached) ? cached : [];
+    })();
+
+    const writeLocal = (rows: any[]) => {
+      try {
+        localStorage.setItem(serviceQuotesCacheKey(scopeKey), JSON.stringify(rows));
+      } catch {}
+    };
+
+    if (useCloud && orgId) {
+      const saved = await dbUpsertServiceQuote(orgId, input);
+      writeLocal([saved, ...localRows.filter((q) => String(q?.id) !== String(saved.id))]);
+      return saved;
+    }
+
+    const id = String(input?.id || crypto.randomUUID());
+    const saved = {
+      ...input,
+      id,
+      createdAt: input?.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    writeLocal([saved, ...localRows.filter((q) => String(q?.id) !== id)]);
+    return saved;
+  };
+
+  const handleDeleteServiceQuote = async (quoteId: string) => {
+    const localRows = (() => {
+      const cached = safeJsonParse<any[]>(localStorage.getItem(serviceQuotesCacheKey(scopeKey)));
+      return Array.isArray(cached) ? cached : [];
+    })();
+
+    try {
+      localStorage.setItem(
+        serviceQuotesCacheKey(scopeKey),
+        JSON.stringify(localRows.filter((q) => String(q?.id) !== String(quoteId)))
+      );
+    } catch {}
+
+    if (!useCloud || !orgId) return;
+    await dbDeleteServiceQuote(orgId, quoteId);
   };
 
   const handleImportMaterialPrices = async (input: { url: string; vendor: string; currency: string }) => {
@@ -414,6 +566,25 @@ const App: React.FC = () => {
     }
   };
 
+  const handleUpdateRequisitionStatus = async (
+    requisitionId: string,
+    status: 'sent' | 'confirmed' | 'received' | 'cancelled'
+  ) => {
+    try {
+      const raw = localStorage.getItem(requisitionsCacheKey(scopeKey));
+      const prev = raw ? JSON.parse(raw) : [];
+      const next = Array.isArray(prev)
+        ? prev.map((r: any) => (String(r?.id) === String(requisitionId) ? { ...r, status } : r))
+        : prev;
+      localStorage.setItem(requisitionsCacheKey(scopeKey), JSON.stringify(next));
+    } catch {
+      // ignore
+    }
+
+    if (!useCloud || !orgId) return;
+    await updateRequisitionStatus(orgId, requisitionId, status);
+  };
+
   const handleListEmployees = async () => {
     if (!useCloud || !orgId) return null;
     return await listEmployees(orgId);
@@ -490,11 +661,18 @@ const App: React.FC = () => {
       await ensureSupabaseSession();
       const resolvedOrgId = await getOrCreateOrgId();
       setOrgId(resolvedOrgId);
+      try {
+        const role = await getMyOrgRole(resolvedOrgId);
+        setCanApproveRequisitions(role === 'owner' || role === 'admin');
+      } catch {
+        setCanApproveRequisitions(false);
+      }
       await refreshProjects(resolvedOrgId);
     } catch (e: any) {
       console.error(e);
       setCloudError(e?.message || 'Error inicializando Supabase');
       setOrgId(null);
+      setCanApproveRequisitions(false);
       setCloudMode('local');
     } finally {
       setIsCloudInitInFlight(false);
@@ -742,6 +920,11 @@ const App: React.FC = () => {
                 onLoadBudget={handleLoadBudget}
                 onCreateRequisition={handleCreateRequisition}
                 onListRequisitions={handleListRequisitions}
+                onUpdateRequisitionStatus={handleUpdateRequisitionStatus}
+                canApproveRequisitions={canApproveRequisitions}
+                onListSuppliers={handleListSuppliers}
+                onUpsertSupplier={handleUpsertSupplier}
+                onDeleteSupplier={handleDeleteSupplier}
               />
             )}
             {currentView === 'RRHH' && (
@@ -753,11 +936,19 @@ const App: React.FC = () => {
                 onUpsertContract={handleUpsertEmployeeContract}
                 onListAttendance={handleListAttendance}
                 onSetAttendanceToken={handleSetAttendanceToken}
+                onLoadPayRates={handleLoadPayRates}
+                onSavePayRates={handleSavePayRates}
+                onLoadEmployeeRateOverrides={handleLoadEmployeeRateOverrides}
+                onUpsertEmployeeRateOverride={handleUpsertEmployeeRateOverride}
+                onDeleteEmployeeRateOverride={handleDeleteEmployeeRateOverride}
               />
             )}
             {currentView === 'COTIZADOR' && (
               <Cotizador 
                 initialData={quoteInitialData} 
+                onListQuotes={handleListServiceQuotes}
+                onUpsertQuote={handleUpsertServiceQuote}
+                onDeleteQuote={handleDeleteServiceQuote}
               />
             )}
             {currentView === 'DIAGNOSTICO' && (

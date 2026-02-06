@@ -168,6 +168,7 @@ const Dashboard: React.FC<Props> = ({ projects, useCloud = false, orgId = null }
   }, [useCloud, orgId]);
 
   const net = monthIncome - monthExpense;
+  const marginPct = monthIncome > 0 ? net / monthIncome : null;
 
   return (
     <div className="space-y-6">
@@ -188,6 +189,11 @@ const Dashboard: React.FC<Props> = ({ projects, useCloud = false, orgId = null }
         <div className="bg-white p-6 rounded-xl shadow border-l-4 border-green-500">
            <h4 className="text-gray-500 text-sm">Utilidad Neta</h4>
           <p className={`text-3xl font-bold ${net >= 0 ? 'text-green-600' : 'text-red-600'}`}>{currency.format(net)}</p>
+        </div>
+
+        <div className="bg-white p-6 rounded-xl shadow border-l-4 border-gray-400">
+           <h4 className="text-gray-500 text-sm">Margen (Mes)</h4>
+          <p className="text-3xl font-bold text-navy-900">{marginPct === null ? '—' : `${Math.round(marginPct * 100)}%`}</p>
         </div>
       </div>
 

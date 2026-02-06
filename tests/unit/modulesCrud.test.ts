@@ -371,7 +371,7 @@ describe('module CRUD smoke (unit, Supabase wiring)', () => {
     await createRequisition('org1', 'p1', null, null, [{ name: 'Cemento', unit: 'saco', quantity: 1 }], 'sent');
     const list = await listRequisitions('org1');
     expect(list).toHaveLength(1);
-    await updateRequisitionStatus('org1', 'r1', 'done');
+    await updateRequisitionStatus('org1', 'r1', 'received');
 
     const fromTables = mockClient.calls.filter((c) => c.type === 'from').map((c) => c.table);
     expect(fromTables).toEqual(expect.arrayContaining(['requisitions', 'requisition_items', 'v_requisition_totals']));

@@ -60,6 +60,10 @@ Por defecto, Supabase Realtime se habilita **por tabla**. Si quieres suscripcion
 El repo incluye un test opcional: [tests/integration/supabase.realtime.integration.test.ts](tests/integration/supabase.realtime.integration.test.ts). Por defecto solo avisa con `console.warn` si no llegan eventos.
 Si quieres que falle cuando no haya Realtime, define `SUPABASE_REQUIRE_REALTIME=true` y corre `npm run test:supabase`.
 
+En PowerShell:
+
+`$env:SUPABASE_REQUIRE_REALTIME='true'; npm run test:supabase`
+
 ## Deploy a GitHub Pages
 
 Este repo está configurado para desplegarse automáticamente a GitHub Pages con GitHub Actions.

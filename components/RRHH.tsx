@@ -1,8 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Project, Employee } from '../types';
 import { PAY_RATES } from '../constants';
 import { UserPlus, MapPin, Copy, Send, FileText, Pencil, Save } from 'lucide-react';
 import { MapContainer, Marker, Popup, TileLayer } from 'react-leaflet';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 interface Props {
   projects: Project[];
@@ -12,6 +14,11 @@ interface Props {
   onUpsertContract?: (input: any) => Promise<any>;
   onListAttendance?: (workDate: string) => Promise<any[] | null>;
   onSetAttendanceToken?: (employeeId: string, token: string) => Promise<void>;
+  onLoadPayRates?: () => Promise<Record<string, number> | null>;
+  onSavePayRates?: (payRates: Record<string, number>) => Promise<void>;
+  onLoadEmployeeRateOverrides?: () => Promise<Record<string, number> | null>;
+  onUpsertEmployeeRateOverride?: (employeeId: string, dailyRate: number) => Promise<void>;
+  onDeleteEmployeeRateOverride?: (employeeId: string) => Promise<void>;
 }
 
 type PayRates = Record<string, number>;
@@ -45,6 +52,21 @@ type ContractRecord = {
   seed: ContractSeed;
   response?: ContractResponse;
 };
+
+const isLikelyUuid = (s: string) => {
+  const v = String(s || '').trim();
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
+};
+
+const requireNonEmptyTrim = (v: any, label: string) => {
+  const s = String(v ?? '').trim();
+  if (!s) throw new Error(`${label} requerido.`);
+  return s;
+};
+
+const isLikelyIsoDateOnly = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || '').trim());
+
+const normalizeCompareText = (s: any) => String(s ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 
 const base64UrlEncode = (text: string) => {
   const b64 = btoa(unescape(encodeURIComponent(text)));
@@ -85,7 +107,20 @@ const safeNumber = (v: any, fallback = 0) => {
   return Number.isFinite(n) ? n : fallback;
 };
 
-const RRHH: React.FC<Props> = ({ projects, onListEmployees, onCreateEmployee, onListContracts, onUpsertContract, onListAttendance, onSetAttendanceToken }) => {
+const RRHH: React.FC<Props> = ({
+  projects,
+  onListEmployees,
+  onCreateEmployee,
+  onListContracts,
+  onUpsertContract,
+  onListAttendance,
+  onSetAttendanceToken,
+  onLoadPayRates,
+  onSavePayRates,
+  onLoadEmployeeRateOverrides,
+  onUpsertEmployeeRateOverride,
+  onDeleteEmployeeRateOverride,
+}) => {
   const [activeTab, setActiveTab] = useState<'CONTRATOS' | 'ASISTENCIA' | 'PLANILLA'>('CONTRATOS');
   
   const mockEmployees: Employee[] = useMemo(
@@ -170,6 +205,81 @@ const RRHH: React.FC<Props> = ({ projects, onListEmployees, onCreateEmployee, on
   };
 
   const [employeeRateOverrides, setEmployeeRateOverrides] = useState<Record<string, number>>(loadOverrides);
+
+  useEffect(() => {
+    if (!onLoadPayRates) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const remote = await onLoadPayRates();
+        if (cancelled) return;
+        if (remote && typeof remote === 'object') {
+          setPayRates((prev) => ({ ...prev, ...remote }));
+        }
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [onLoadPayRates]);
+
+  useEffect(() => {
+    if (!onLoadEmployeeRateOverrides) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const remote = await onLoadEmployeeRateOverrides();
+        if (cancelled) return;
+        if (remote && typeof remote === 'object') {
+          setEmployeeRateOverrides(remote);
+        }
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [onLoadEmployeeRateOverrides]);
+
+  useEffect(() => {
+    if (!onSavePayRates) return;
+    const t = window.setTimeout(() => {
+      void (async () => {
+        try {
+          await onSavePayRates(payRates);
+        } catch {
+          // ignore
+        }
+      })();
+    }, 700);
+    return () => window.clearTimeout(t);
+  }, [payRates, onSavePayRates]);
+
+  useEffect(() => {
+    if (!onUpsertEmployeeRateOverride && !onDeleteEmployeeRateOverride) return;
+    const snapshot = { ...employeeRateOverrides };
+    const t = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const entries = Object.entries(snapshot);
+          for (const [employeeId, rate] of entries) {
+            const safe = safeNumber(rate, 0);
+            if (safe <= 0) {
+              if (onDeleteEmployeeRateOverride) await onDeleteEmployeeRateOverride(employeeId);
+            } else {
+              if (onUpsertEmployeeRateOverride) await onUpsertEmployeeRateOverride(employeeId, safe);
+            }
+          }
+        } catch {
+          // ignore
+        }
+      })();
+    }, 700);
+    return () => window.clearTimeout(t);
+  }, [employeeRateOverrides, onUpsertEmployeeRateOverride, onDeleteEmployeeRateOverride]);
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_EMPLOYEE_OVERRIDES, JSON.stringify(employeeRateOverrides));
@@ -184,6 +294,15 @@ const RRHH: React.FC<Props> = ({ projects, onListEmployees, onCreateEmployee, on
   const [attendanceDate, setAttendanceDate] = useState<string>(() => toISODate(new Date()));
   const [attendanceRows, setAttendanceRows] = useState<any[]>([]);
   const [loadingAttendance, setLoadingAttendance] = useState(false);
+
+  const [payrollStart, setPayrollStart] = useState<string>(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 6);
+    return toISODate(d);
+  });
+  const [payrollEnd, setPayrollEnd] = useState<string>(() => toISODate(new Date()));
+  const [payrollBusy, setPayrollBusy] = useState(false);
+  const [payrollComputed, setPayrollComputed] = useState<Record<string, { daysWorked: number }>>({});
 
   const refreshAttendance = async () => {
     if (!onListAttendance) {
@@ -239,7 +358,7 @@ const RRHH: React.FC<Props> = ({ projects, onListEmployees, onCreateEmployee, on
     }
   }, [contracts]);
 
-  const refreshContracts = async () => {
+  const refreshContracts = useCallback(async () => {
     try {
       if (!onListContracts) return;
       const rows = await onListContracts();
@@ -285,7 +404,16 @@ const RRHH: React.FC<Props> = ({ projects, onListEmployees, onCreateEmployee, on
     } catch {
       // ignore (localStorage fallback already exists)
     }
-  };
+  }, [onListContracts]);
+
+  useEffect(() => {
+    if (activeTab !== 'CONTRATOS') return;
+    // Auto-refresh so RRHH sees applicant submissions without reloading.
+    const id = window.setInterval(() => {
+      refreshContracts();
+    }, 5000);
+    return () => window.clearInterval(id);
+  }, [activeTab, refreshContracts]);
 
   const refreshEmployees = async () => {
     setLoadingEmployees(true);
@@ -377,7 +505,9 @@ const RRHH: React.FC<Props> = ({ projects, onListEmployees, onCreateEmployee, on
         'Abre este link para marcar tu entrada/salida con GPS:',
         url,
         '',
-        'IMPORTANTE: Debes permitir ubicación (GPS).',
+        'IMPORTANTE:',
+        '- Debes permitir ubicación (GPS).',
+        '- Si te aparece opción de instalar, selecciona “Agregar a la pantalla de inicio”.',
       ].join('\n');
       window.open(buildWhatsAppLink(phone, msg), '_blank', 'noopener,noreferrer');
     }
@@ -441,7 +571,8 @@ const RRHH: React.FC<Props> = ({ projects, onListEmployees, onCreateEmployee, on
       'Por favor abrir el link y completar los datos:',
       contractLink,
       '',
-      'Al finalizar, envíe el código de respuesta a RRHH.',
+      'Al finalizar, envía el CÓDIGO DE RESPUESTA a RRHH.',
+      'Nota: el código contiene datos personales; no lo compartas con terceros.',
     ].filter(Boolean).join('\n');
     const link = buildWhatsAppLink(contractPhone || null, msg);
     window.open(link, '_blank', 'noopener,noreferrer');
@@ -458,27 +589,47 @@ const RRHH: React.FC<Props> = ({ projects, onListEmployees, onCreateEmployee, on
     try {
       const json = base64UrlDecode(code);
       const parsed = JSON.parse(json) as ContractResponse;
-      if (!parsed?.requestId || !parsed?.employeeName) throw new Error('Formato inválido');
+      const requestId = requireNonEmptyTrim(parsed?.requestId, 'requestId');
+      if (!isLikelyUuid(requestId)) throw new Error('requestId inválido. Solicita un nuevo link a RRHH.');
+      const employeeName = requireNonEmptyTrim(parsed?.employeeName, 'Nombre del empleado');
+      const role = requireNonEmptyTrim(parsed?.role, 'Puesto');
+      if (!parsed?.accepted) throw new Error('El colaborador no aceptó la confirmación.');
+      requireNonEmptyTrim(parsed?.dpi, 'DPI / CUI');
+      requireNonEmptyTrim(parsed?.phone, 'Teléfono');
+      const startDate = requireNonEmptyTrim(parsed?.startDate, 'Fecha de inicio');
+      if (!isLikelyIsoDateOnly(startDate)) throw new Error('Fecha de inicio inválida.');
+
+      const existing = contracts.find((c) => c.requestId === requestId) || null;
+      if (existing?.seed) {
+        if (normalizeCompareText(existing.seed.employeeName) !== normalizeCompareText(employeeName)) {
+          throw new Error('El código no coincide con el empleado del link generado (requestId existente).');
+        }
+        if (normalizeCompareText(existing.seed.role) !== normalizeCompareText(role)) {
+          throw new Error('El código no coincide con el puesto del link generado (requestId existente).');
+        }
+      }
 
       const parsedProjectId = (parsed as any).projectId ? String((parsed as any).projectId) : undefined;
       const resolvedProjectId = parsedProjectId || selectedProject?.id;
       const projectForEmployee = resolvedProjectId;
       const resolvedProjectName = parsed.projectName || selectedProject?.name;
 
+      const seedSource = existing?.seed;
+
       const record: ContractRecord = {
-        requestId: parsed.requestId,
+        requestId,
         status: 'received',
         seed: {
-          companyName: parsed.companyName,
-          requestedAt: parsed.requestedAt,
-          requestId: parsed.requestId,
-          employeeId: (parsed as any).employeeId ? String((parsed as any).employeeId) : undefined,
-          projectId: resolvedProjectId,
-          employeeName: parsed.employeeName,
-          employeePhone: (parsed as any).employeePhone ? String((parsed as any).employeePhone) : undefined,
-          role: parsed.role,
-          dailyRate: safeNumber(parsed.dailyRate, 0),
-          projectName: resolvedProjectName,
+          companyName: seedSource?.companyName ?? parsed.companyName,
+          requestedAt: seedSource?.requestedAt ?? parsed.requestedAt,
+          requestId,
+          employeeId: seedSource?.employeeId ?? ((parsed as any).employeeId ? String((parsed as any).employeeId) : undefined),
+          projectId: seedSource?.projectId ?? resolvedProjectId,
+          employeeName: seedSource?.employeeName ?? employeeName,
+          employeePhone: seedSource?.employeePhone ?? ((parsed as any).employeePhone ? String((parsed as any).employeePhone) : undefined),
+          role: seedSource?.role ?? role,
+          dailyRate: safeNumber(seedSource?.dailyRate ?? parsed.dailyRate, 0),
+          projectName: seedSource?.projectName ?? resolvedProjectName,
         },
         response: parsed,
       };
@@ -543,6 +694,192 @@ const RRHH: React.FC<Props> = ({ projects, onListEmployees, onCreateEmployee, on
     }
   };
 
+  const downloadContractPdf = (c: ContractRecord) => {
+    if (!c.response) {
+      alert('Este contrato aún no tiene respuesta del colaborador.');
+      return;
+    }
+
+    const seed = c.seed;
+    const res = c.response;
+    const doc = new jsPDF({ orientation: 'p', unit: 'pt', format: 'a4' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 40;
+    let y = 44;
+
+    const title = `${seed.companyName || 'Empresa'}\nCONTRATO INDIVIDUAL DE TRABAJO (PLANTILLA)`;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text(title, margin, y);
+    y += 44;
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.text(`Solicitud: ${new Date(seed.requestedAt).toLocaleString()}   •   ID: ${seed.requestId}`, margin, y);
+    y += 18;
+    doc.text(`Generado: ${new Date().toLocaleString()} (RRHH)`, margin, y);
+    y += 18;
+
+    autoTable(doc as any, {
+      startY: y,
+      theme: 'grid',
+      styles: { fontSize: 9, cellPadding: 5, overflow: 'linebreak' },
+      head: [['Campo', 'Valor']],
+      body: [
+        ['Empleado', seed.employeeName],
+        ['DPI / CUI', res.dpi || '—'],
+        ['Teléfono', res.phone || '—'],
+        ['Dirección', res.address || '—'],
+        ['Puesto', seed.role],
+        ['Proyecto / Obra', seed.projectName || '—'],
+        ['Fecha de inicio', res.startDate || '—'],
+        ['Salario', `Q${formatRate(seed.dailyRate)}/día`],
+        ['Contacto emergencia', res.emergencyContact || '—'],
+      ],
+      margin: { left: margin, right: margin },
+    });
+
+    y = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 18 : y + 18;
+
+    const addSection = (heading: string, content: string) => {
+      const maxWidth = pageWidth - margin * 2;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.text(heading, margin, y);
+      y += 14;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      const lines = doc.splitTextToSize(content, maxWidth);
+      doc.text(lines, margin, y);
+      y += lines.length * 12 + 10;
+    };
+
+    addSection(
+      '1) Objeto',
+      'El colaborador se obliga a prestar sus servicios personales bajo dirección de la empresa en el puesto indicado, en el proyecto/obra señalado, cumpliendo normas de seguridad, calidad y reglamento interno.'
+    );
+    addSection(
+      '2) Jornada y lugar de trabajo',
+      'La jornada se regirá por la planificación de obra y podrá variar según necesidades operativas. El lugar de trabajo será el proyecto/obra asignado o donde la empresa indique para fines de la ejecución del trabajo.'
+    );
+    addSection(
+      '3) Remuneración',
+      `La empresa pagará al colaborador una remuneración de Q${formatRate(seed.dailyRate)}/día laborado. La forma de pago será según planilla (semanal o quincenal) y controles internos de asistencia.`
+    );
+    addSection(
+      '4) Control de asistencia y evidencia',
+      'El colaborador acepta el registro de asistencia mediante GPS y evidencia biométrica/código conforme al sistema implementado. Dichos registros podrán usarse para control de planilla y auditoría.'
+    );
+    addSection(
+      '5) Terminación',
+      'Este documento es una plantilla operativa. Debe ser revisado y ajustado por la empresa conforme a normativa laboral aplicable y políticas internas.'
+    );
+
+    y += 6;
+    doc.setFont('helvetica', 'bold');
+    doc.text('Firmas', margin, y);
+    y += 22;
+    doc.setFont('helvetica', 'normal');
+    doc.text('______________________________', margin, y);
+    doc.text('______________________________', pageWidth / 2 + 10, y);
+    y += 14;
+    doc.text('Colaborador', margin, y);
+    doc.text('Empresa', pageWidth / 2 + 10, y);
+
+    const safeName = String(seed.employeeName || 'Contrato')
+      .normalize('NFKD')
+      .replace(/[^a-zA-Z0-9\-_.\s]/g, '')
+      .trim()
+      .replace(/\s+/g, '-');
+    doc.save(`Contrato-${safeName || 'Empleado'}-${seed.requestId}.pdf`);
+  };
+
+  const downloadPayrollPdf = () => {
+    const startLabel = payrollStart || '';
+    const endLabel = payrollEnd || '';
+
+    const projectNameById = new Map<string, string>();
+    projects.forEach((p) => {
+      if (p?.id) projectNameById.set(String(p.id), String(p.name ?? ''));
+    });
+
+    const rows = employeesWithOverrides.map((e) => {
+      const daysWorked = payrollComputed[e.id]?.daysWorked ?? 6;
+      const dailyRate = safeNumber(employeeRateOverrides[e.id] ?? e.dailyRate, e.dailyRate);
+      const total = dailyRate * daysWorked;
+      const projectName = e.projectId ? (projectNameById.get(String(e.projectId)) ?? '') : '';
+      return {
+        employee: e.name,
+        position: String(e.position ?? ''),
+        projectName,
+        daysWorked,
+        dailyRate,
+        total,
+      };
+    });
+
+    const grandTotal = rows.reduce((sum, r) => sum + safeNumber(r.total, 0), 0);
+
+    const doc = new jsPDF({ orientation: 'p', unit: 'pt', format: 'a4' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 40;
+    let y = 44;
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text('M&S Construcción', margin, y);
+    y += 18;
+    doc.setFontSize(12);
+    doc.text('PLANILLA SEMANAL (CONTROL INTERNO)', margin, y);
+    y += 18;
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.text(`Periodo: ${startLabel || '—'} a ${endLabel || '—'}`, margin, y);
+    y += 14;
+    doc.text(`Generado: ${new Date().toLocaleString()}`, margin, y);
+    y += 14;
+
+    autoTable(doc as any, {
+      startY: y + 6,
+      theme: 'grid',
+      styles: { fontSize: 9, cellPadding: 5, overflow: 'linebreak' },
+      head: [['Empleado', 'Puesto', 'Proyecto/Obra', 'Días', 'Salario Día (Q)', 'Total (Q)', 'Observaciones']],
+      body: rows.map((r) => [
+        r.employee,
+        r.position,
+        r.projectName || '—',
+        String(r.daysWorked),
+        (Math.round(r.dailyRate * 100) / 100).toFixed(2),
+        (Math.round(r.total * 100) / 100).toFixed(2),
+        '',
+      ]),
+      columnStyles: {
+        3: { halign: 'center' },
+        4: { halign: 'right' },
+        5: { halign: 'right' },
+      },
+      margin: { left: margin, right: margin },
+    });
+
+    const tableEndY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY : y + 120;
+    y = tableEndY + 18;
+
+    doc.setFont('helvetica', 'bold');
+    doc.text(`TOTAL GENERAL: Q${(Math.round(grandTotal * 100) / 100).toFixed(2)}`, margin, y);
+    y += 26;
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.text('______________________________', margin, y);
+    doc.text('______________________________', pageWidth / 2 + 10, y);
+    y += 14;
+    doc.text('Recibí (Empleado / Representante)', margin, y);
+    doc.text('Entrega (Empresa)', pageWidth / 2 + 10, y);
+
+    doc.save(`Planilla-Semanal-${startLabel || 'inicio'}-a-${endLabel || 'fin'}.pdf`);
+  };
+
   const printContract = (c: ContractRecord) => {
     const seed = c.seed;
     const res = c.response;
@@ -565,10 +902,11 @@ const RRHH: React.FC<Props> = ({ projects, onListEmployees, onCreateEmployee, on
             td, th { border: 1px solid #ddd; padding: 8px; font-size: 12px; }
             .sig { margin-top: 28px; display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
             .line { border-top: 1px solid #333; padding-top: 6px; }
+            .box { border: 1px solid #ddd; padding: 10px; margin-top: 10px; }
           </style>
         </head>
         <body>
-          <h1>${seed.companyName} - Contrato de Trabajo</h1>
+          <h1>${seed.companyName} - Contrato Individual de Trabajo (Plantilla)</h1>
           <div class="muted">Solicitud: ${new Date(seed.requestedAt).toLocaleString()} • ID: ${seed.requestId}</div>
           <h2>Datos</h2>
           <table>
@@ -579,13 +917,18 @@ const RRHH: React.FC<Props> = ({ projects, onListEmployees, onCreateEmployee, on
             <tr><th>Dirección</th><td colspan="3">${res?.address || '-'}</td></tr>
             <tr><th>Contacto emergencia</th><td colspan="3">${res?.emergencyContact || '-'}</td></tr>
           </table>
-          <h2>Cláusulas (resumen)</h2>
-          <div class="muted">Documento generado para impresión. Ajustar contenido legal según políticas de la empresa.</div>
-          <ul>
-            <li>Jornada y responsabilidades según puesto.</li>
-            <li>Pago diario según tarifa indicada.</li>
-            <li>Cumplimiento de normas de seguridad y reglamento interno.</li>
-          </ul>
+          <h2>Cláusulas (resumen operativo)</h2>
+          <div class="box">
+            <div class="muted">Este documento es una plantilla profesional para control interno (RRHH/obra). Ajustar y validar contenido legal según normativa aplicable.</div>
+            <ol>
+              <li><b>Objeto:</b> prestación de servicios en el puesto indicado bajo dirección de la empresa.</li>
+              <li><b>Jornada:</b> según planificación de obra y necesidades operativas.</li>
+              <li><b>Remuneración:</b> Q${formatRate(seed.dailyRate)}/día laborado, según planilla y controles internos.</li>
+              <li><b>Seguridad:</b> cumplimiento de normas de SST y reglamento interno.</li>
+              <li><b>Asistencia:</b> registro con GPS y evidencia biométrica/código para control de planilla.</li>
+            </ol>
+          </div>
+          <div class="muted" style="margin-top:10px">Sugerencia: en el diálogo de impresión seleccione “Guardar como PDF”.</div>
           <div class="sig">
             <div><div class="line">Firma Empleado</div></div>
             <div><div class="line">Firma Empresa</div></div>
@@ -759,7 +1102,9 @@ const RRHH: React.FC<Props> = ({ projects, onListEmployees, onCreateEmployee, on
                  </label>
                ))}
              </div>
-             <div className="text-xs text-gray-500 mt-2">Se guardan en este navegador.</div>
+             <div className="text-xs text-gray-500 mt-2">
+               {onSavePayRates ? 'Se guardan en Supabase (modo cloud) y en este navegador.' : 'Se guardan en este navegador.'}
+             </div>
            </div>
 
            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -869,7 +1214,17 @@ const RRHH: React.FC<Props> = ({ projects, onListEmployees, onCreateEmployee, on
            </div>
 
            <div className="mt-6">
-             <h4 className="font-bold text-gray-700 mb-2">Contratos (enviados/recibidos)</h4>
+             <div className="flex items-center justify-between gap-2 mb-2">
+               <h4 className="font-bold text-gray-700">Contratos (enviados/recibidos)</h4>
+               <button
+                 type="button"
+                 className="bg-white border px-3 py-1 rounded font-bold hover:bg-gray-50 text-xs"
+                 onClick={refreshContracts}
+                 title="Actualizar contratos"
+               >
+                 Actualizar
+               </button>
+             </div>
              {contracts.length === 0 ? (
                <div className="text-sm text-gray-400 italic">Sin contratos aún.</div>
              ) : (
@@ -891,6 +1246,14 @@ const RRHH: React.FC<Props> = ({ projects, onListEmployees, onCreateEmployee, on
                        >
                          Imprimir
                        </button>
+                           <button
+                             onClick={() => downloadContractPdf(c)}
+                             className="px-3 py-1 rounded bg-white border hover:bg-gray-50 text-xs"
+                             title={c.status === 'received' ? 'Descargar PDF' : 'PDF disponible al recibir respuesta'}
+                             disabled={c.status !== 'received'}
+                           >
+                             PDF
+                           </button>
                      </div>
                    </li>
                  ))}
@@ -1055,7 +1418,108 @@ const RRHH: React.FC<Props> = ({ projects, onListEmployees, onCreateEmployee, on
 
       {activeTab === 'PLANILLA' && (
         <div className="bg-white p-6 rounded-xl shadow-lg animate-fade-in">
-          <h3 className="font-bold text-lg mb-4">Planilla Semanal Calculada</h3>
+          <div className="flex items-center justify-between gap-2 flex-wrap mb-4">
+            <h3 className="font-bold text-lg">Planilla Semanal Calculada</h3>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className="bg-white border px-4 py-2 rounded font-bold hover:bg-gray-50 text-sm"
+                onClick={() => window.print()}
+                title="Imprimir"
+              >
+                Imprimir
+              </button>
+              <button
+                type="button"
+                className="bg-navy-900 text-white px-4 py-2 rounded font-bold hover:bg-navy-800 text-sm"
+                onClick={downloadPayrollPdf}
+                title="Descargar PDF"
+              >
+                PDF
+              </button>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-4">
+            <label className="text-xs text-gray-600">
+              Inicio
+              <input
+                type="date"
+                className="mt-1 w-full p-2 border rounded text-sm"
+                value={payrollStart}
+                onChange={(e) => setPayrollStart(e.target.value)}
+              />
+            </label>
+            <label className="text-xs text-gray-600">
+              Fin
+              <input
+                type="date"
+                className="mt-1 w-full p-2 border rounded text-sm"
+                value={payrollEnd}
+                onChange={(e) => setPayrollEnd(e.target.value)}
+              />
+            </label>
+            <div className="flex items-end">
+              <button
+                type="button"
+                className="w-full bg-white border px-4 py-2 rounded font-bold hover:bg-gray-50 text-sm disabled:opacity-50"
+                disabled={payrollBusy || !onListAttendance}
+                onClick={async () => {
+                  if (!onListAttendance) {
+                    alert('Planilla automática requiere Supabase (onListAttendance).');
+                    return;
+                  }
+                  if (!payrollStart || !payrollEnd) return;
+                  const start = new Date(`${payrollStart}T00:00:00`);
+                  const end = new Date(`${payrollEnd}T00:00:00`);
+                  if (!(start instanceof Date) || !(end instanceof Date) || isNaN(start.getTime()) || isNaN(end.getTime())) {
+                    alert('Rango de fechas inválido.');
+                    return;
+                  }
+                  if (end.getTime() < start.getTime()) {
+                    alert('La fecha fin debe ser mayor o igual a inicio.');
+                    return;
+                  }
+
+                  const msDay = 24 * 60 * 60 * 1000;
+                  const days = Math.floor((end.getTime() - start.getTime()) / msDay) + 1;
+                  if (days > 31) {
+                    alert('Rango demasiado largo. Máximo 31 días.');
+                    return;
+                  }
+
+                  setPayrollBusy(true);
+                  try {
+                    const counts: Record<string, Set<string>> = {};
+                    for (let i = 0; i < days; i++) {
+                      const d = new Date(start.getTime() + i * msDay);
+                      const iso = toISODate(d);
+                      const rows = await onListAttendance(iso);
+                      const list = Array.isArray(rows) ? rows : [];
+                      for (const r of list) {
+                        const employeeId = String((r as any).employee_id ?? (r as any).employeeId ?? '');
+                        if (!employeeId) continue;
+                        const hasCheckIn = !!(r as any).check_in;
+                        if (!hasCheckIn) continue;
+                        if (!counts[employeeId]) counts[employeeId] = new Set();
+                        counts[employeeId].add(iso);
+                      }
+                    }
+                    const computed: Record<string, { daysWorked: number }> = {};
+                    Object.keys(counts).forEach((employeeId) => {
+                      computed[employeeId] = { daysWorked: counts[employeeId].size };
+                    });
+                    setPayrollComputed(computed);
+                  } catch (e: any) {
+                    alert(e?.message || 'No se pudo calcular la planilla');
+                  } finally {
+                    setPayrollBusy(false);
+                  }
+                }}
+              >
+                {payrollBusy ? 'Calculando…' : 'Calcular por asistencia'}
+              </button>
+            </div>
+          </div>
           <table className="w-full text-sm">
             <thead className="bg-navy-900 text-white">
               <tr>
@@ -1070,16 +1534,16 @@ const RRHH: React.FC<Props> = ({ projects, onListEmployees, onCreateEmployee, on
               {employeesWithOverrides.map(e => (
                 <tr key={e.id} className="border-b">
                   <td className="p-3">{e.name} <br/><span className="text-xs text-gray-500">{e.position}</span></td>
-                  <td className="p-3 text-center">6</td>
+                  <td className="p-3 text-center">{payrollComputed[e.id]?.daysWorked ?? 6}</td>
                   <td className="p-3 text-center">0</td>
-                  <td className="p-3 text-right font-bold">Q{(e.dailyRate * 6).toFixed(2)}</td>
+                  <td className="p-3 text-right font-bold">Q{(e.dailyRate * (payrollComputed[e.id]?.daysWorked ?? 6)).toFixed(2)}</td>
                   <td className="p-3 text-center"><span className="text-yellow-600 font-bold">Pendiente</span></td>
                 </tr>
               ))}
             </tbody>
           </table>
           <div className="mt-4 text-right">
-             <button className="bg-mustard-500 text-black px-6 py-2 rounded font-bold shadow-md hover:bg-mustard-600">
+             <button className="bg-mustard-500 text-black px-6 py-2 rounded font-bold shadow-md hover:bg-mustard-600" onClick={() => window.print()}>
                Imprimir y Pagar
              </button>
           </div>

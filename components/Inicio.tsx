@@ -22,21 +22,33 @@ const Inicio: React.FC<Props> = ({ projects, onViewChange, onCreateTransaction }
   const [provider, setProvider] = useState('');
   const [rentEnd, setRentEnd] = useState('');
 
+  const safeAmount = (raw: string): number | null => {
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return null;
+    return n;
+  };
+
   const handleSave = async () => {
     if (!selectedProject) return alert('Seleccione un proyecto');
+    if (!description.trim()) return alert('Ingrese una descripción');
+
+    const amt = safeAmount(amount);
+    if (amt === null) return alert('Ingrese un monto válido');
+    if (amt <= 0) return alert('El monto debe ser mayor a 0');
+    if (!category.trim()) return alert('Seleccione una categoría');
     
     // In a real app, this would dispatch to context or API
     const newTransaction: Transaction = {
-      id: Date.now().toString(),
+      id: crypto.randomUUID(),
       projectId: selectedProject,
       type: activeTab,
-      description,
-      amount: parseFloat(amount),
+      description: description.trim(),
+      amount: amt,
       unit,
-      cost: parseFloat(amount), // simplified logic
-      category,
+      cost: amt, // simplified logic
+      category: category.trim(),
       date: new Date().toISOString(),
-      provider: activeTab === 'GASTO' ? provider : undefined,
+      provider: activeTab === 'GASTO' ? (provider.trim() || undefined) : undefined,
       rentEndDate: rentEnd || undefined
     };
 

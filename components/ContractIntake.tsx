@@ -1,5 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { FileText, Copy, Send } from 'lucide-react';
+import { isSupabaseConfigured } from '../lib/supabaseClient';
+import { submitEmployeeContractResponsePublic } from '../lib/db';
 
 type IntakeSeed = {
   companyName: string;
@@ -22,6 +24,11 @@ type IntakeResponse = IntakeSeed & {
   emergencyContact: string;
   accepted: boolean;
   responseAt: string;
+};
+
+const isLikelyUuid = (s: string) => {
+  const v = String(s || '').trim();
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
 };
 
 const base64UrlEncode = (text: string) => {
@@ -52,6 +59,7 @@ const ContractIntake: React.FC = () => {
       const json = base64UrlDecode(m[1]);
       const parsed = JSON.parse(json) as IntakeSeed;
       if (!parsed?.employeeName || !parsed?.role || !parsed?.requestId) return null;
+      if (!isLikelyUuid(parsed.requestId)) return null;
       return parsed;
     } catch {
       return null;
@@ -64,6 +72,8 @@ const ContractIntake: React.FC = () => {
   const [startDate, setStartDate] = useState('');
   const [emergencyContact, setEmergencyContact] = useState('');
   const [accepted, setAccepted] = useState(false);
+  const [cloudSubmitStatus, setCloudSubmitStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [cloudSubmitError, setCloudSubmitError] = useState<string>('');
 
   const responseCode = useMemo(() => {
     if (!seed) return '';
@@ -89,7 +99,37 @@ const ContractIntake: React.FC = () => {
     return true;
   }, [seed, accepted, dpi, phone, startDate]);
 
+  const tryCloudSubmit = async () => {
+    if (!seed) return false;
+    if (!canSubmit) return false;
+    if (!isSupabaseConfigured) return false;
+    if (cloudSubmitStatus === 'sent') return true;
+
+    setCloudSubmitStatus('sending');
+    setCloudSubmitError('');
+    try {
+      const payload: IntakeResponse = {
+        ...seed,
+        dpi: dpi.trim(),
+        phone: phone.trim(),
+        address: address.trim(),
+        startDate: startDate.trim(),
+        emergencyContact: emergencyContact.trim(),
+        accepted,
+        responseAt: new Date().toISOString(),
+      };
+      await submitEmployeeContractResponsePublic({ requestId: seed.requestId, response: payload });
+      setCloudSubmitStatus('sent');
+      return true;
+    } catch (e: any) {
+      setCloudSubmitStatus('error');
+      setCloudSubmitError(String(e?.message || 'No se pudo enviar automáticamente a RRHH.'));
+      return false;
+    }
+  };
+
   const handleCopy = async () => {
+    await tryCloudSubmit();
     try {
       await navigator.clipboard.writeText(responseCode);
       alert('Código copiado. Envíalo a RRHH para registrar tu contrato.');
@@ -104,6 +144,9 @@ const ContractIntake: React.FC = () => {
       alert('Completa los datos obligatorios y acepta los términos.');
       return;
     }
+    // Best effort: also submit directly to RRHH/Supabase.
+    // WhatsApp remains a fallback and also provides a human-friendly trace.
+    void tryCloudSubmit();
     const msg = [
       `${seed.companyName}`,
       'CONTRATO - RESPUESTA',
@@ -194,6 +237,21 @@ const ContractIntake: React.FC = () => {
         <div className="bg-white rounded-xl shadow-lg p-6">
           <div className="font-bold text-navy-900 mb-2">Enviar respuesta a RRHH</div>
           <p className="text-sm text-gray-600 mb-3">Copia el código y envíalo a RRHH (WhatsApp) para registrar tu contrato.</p>
+
+          {isSupabaseConfigured && (
+            <div className="text-xs border rounded p-2 mb-3 bg-gray-50">
+              <div className="font-semibold text-gray-700">Envío automático a RRHH</div>
+              <div className="text-gray-600">
+                Estado: {cloudSubmitStatus === 'idle' ? 'pendiente' : cloudSubmitStatus === 'sending' ? 'enviando…' : cloudSubmitStatus === 'sent' ? 'enviado' : 'error'}
+              </div>
+              {cloudSubmitStatus === 'error' && cloudSubmitError && (
+                <div className="text-amber-700 mt-1">{cloudSubmitError}</div>
+              )}
+              {cloudSubmitStatus === 'sent' && (
+                <div className="text-green-700 mt-1">RRHH debería ver tu contrato como “Recibido”.</div>
+              )}
+            </div>
+          )}
 
           <label htmlFor="intake-code" className="block text-xs text-gray-600 mb-1">Código</label>
           <textarea

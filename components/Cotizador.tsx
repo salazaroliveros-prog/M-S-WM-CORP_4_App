@@ -1,18 +1,50 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { QUOTE_SERVICES } from '../constants';
 import { QuoteInitialData } from '../types';
-import { FileText, Share2, Printer } from 'lucide-react';
+import { Share2, Printer, Save, Trash2, RotateCcw } from 'lucide-react';
+
+type ServiceQuote = {
+  id: string;
+  client: string;
+  phone: string | null;
+  address: string | null;
+  serviceName: string;
+  quantity: number;
+  unit: string | null;
+  unitPrice: number | null;
+  total: number | null;
+  createdAt: string;
+  updatedAt: string;
+};
 
 interface Props {
   initialData?: QuoteInitialData | null;
+  onListQuotes?: () => Promise<ServiceQuote[]>;
+  onUpsertQuote?: (input: {
+    id?: string | null;
+    client: string;
+    phone?: string | null;
+    address?: string | null;
+    serviceName: string;
+    quantity: number;
+    unit?: string | null;
+    unitPrice?: number | null;
+    total?: number | null;
+  }) => Promise<ServiceQuote>;
+  onDeleteQuote?: (quoteId: string) => Promise<void>;
 }
 
-const Cotizador: React.FC<Props> = ({ initialData }) => {
+const Cotizador: React.FC<Props> = ({ initialData, onListQuotes, onUpsertQuote, onDeleteQuote }) => {
   const [client, setClient] = useState('');
   const [phone, setPhone] = useState('');
   const [selectedService, setSelectedService] = useState('');
   const [quantity, setQuantity] = useState(1);
   const [address, setAddress] = useState('');
+
+  const [editingQuoteId, setEditingQuoteId] = useState<string | null>(null);
+  const [quotes, setQuotes] = useState<ServiceQuote[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
   // Effect to load initial data from project if available
   useEffect(() => {
@@ -22,7 +54,29 @@ const Cotizador: React.FC<Props> = ({ initialData }) => {
     }
   }, [initialData]);
 
-  const serviceData = QUOTE_SERVICES.find(s => s.name === selectedService);
+  const canUseHistory = Boolean(onListQuotes && onUpsertQuote && onDeleteQuote);
+
+  const refreshHistory = async () => {
+    if (!onListQuotes) return;
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const rows = await onListQuotes();
+      setQuotes(Array.isArray(rows) ? rows : []);
+    } catch (e: any) {
+      setHistoryError(String(e?.message ?? e ?? 'Error al cargar historial.'));
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!onListQuotes) return;
+    refreshHistory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canUseHistory]);
+
+  const serviceData = useMemo(() => QUOTE_SERVICES.find(s => s.name === selectedService), [selectedService]);
   const total = serviceData ? serviceData.price * quantity : 0;
 
   const handleSend = () => {
@@ -37,6 +91,62 @@ const Cotizador: React.FC<Props> = ({ initialData }) => {
 
   const handlePrint = () => {
     window.print();
+  };
+
+  const resetForm = () => {
+    setEditingQuoteId(null);
+    setSelectedService('');
+    setQuantity(1);
+    setPhone('');
+    setAddress(initialData?.address || '');
+    setClient(initialData?.clientName || '');
+  };
+
+  const handleSaveToHistory = async () => {
+    if (!onUpsertQuote) return;
+    if (!client || !phone || !selectedService) {
+      alert('Por favor complete los campos obligatorios (Cliente, Teléfono, Servicio).');
+      return;
+    }
+    const payload = {
+      id: editingQuoteId,
+      client,
+      phone,
+      address: address || null,
+      serviceName: selectedService,
+      quantity,
+      unit: serviceData?.unit || null,
+      unitPrice: serviceData?.price ?? null,
+      total,
+    };
+
+    try {
+      const saved = await onUpsertQuote(payload);
+      setEditingQuoteId(saved.id);
+      setQuotes((prev) => [saved, ...prev.filter((q) => q.id !== saved.id)]);
+    } catch (e: any) {
+      alert(String(e?.message ?? e ?? 'No se pudo guardar la cotización.'));
+    }
+  };
+
+  const handleLoadQuote = (q: ServiceQuote) => {
+    setEditingQuoteId(q.id);
+    setClient(q.client || '');
+    setPhone(q.phone || '');
+    setAddress(q.address || '');
+    setSelectedService(q.serviceName || '');
+    setQuantity(Number.isFinite(q.quantity) && q.quantity > 0 ? q.quantity : 1);
+  };
+
+  const handleDeleteFromHistory = async (quoteId: string) => {
+    if (!onDeleteQuote) return;
+    try {
+      await onDeleteQuote(quoteId);
+      setQuotes((prev) => prev.filter((q) => q.id !== quoteId));
+      if (editingQuoteId === quoteId) setEditingQuoteId(null);
+    } catch (e: any) {
+      alert(String(e?.message ?? e ?? 'No se pudo eliminar la cotización.'));
+    }
   };
 
   return (
@@ -162,6 +272,15 @@ const Cotizador: React.FC<Props> = ({ initialData }) => {
           <Printer size={20} />
           <span>Imprimir / Guardar PDF</span>
         </button>
+        {canUseHistory && (
+          <button 
+            onClick={handleSaveToHistory}
+            className="flex-1 bg-mustard-500 text-navy-900 py-3 rounded font-bold hover:bg-mustard-600 flex items-center justify-center space-x-2 transition-colors"
+          >
+            <Save size={20} />
+            <span>Guardar al Historial</span>
+          </button>
+        )}
         <button 
           onClick={handleSend}
           className="flex-1 bg-green-600 text-white py-3 rounded font-bold hover:bg-green-700 flex items-center justify-center space-x-2 transition-colors"
@@ -170,6 +289,79 @@ const Cotizador: React.FC<Props> = ({ initialData }) => {
           <span>Enviar por WhatsApp</span>
         </button>
       </div>
+
+      {canUseHistory && (
+        <div className="mt-6 no-print">
+          <div className="flex items-center justify-between mb-2">
+            <h4 className="text-sm font-bold text-navy-900">Historial de cotizaciones</h4>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={resetForm}
+                className="px-3 py-2 text-sm font-semibold rounded border hover:bg-gray-50 flex items-center gap-2"
+                title="Nueva cotización"
+              >
+                <RotateCcw size={16} />
+                Nueva
+              </button>
+              <button
+                onClick={refreshHistory}
+                disabled={historyLoading}
+                className="px-3 py-2 text-sm font-semibold rounded border hover:bg-gray-50 disabled:opacity-60"
+              >
+                {historyLoading ? 'Cargando...' : 'Actualizar'}
+              </button>
+            </div>
+          </div>
+
+          {historyError && (
+            <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-3 mb-3">{historyError}</div>
+          )}
+
+          {quotes.length === 0 ? (
+            <div className="text-sm text-gray-500 border rounded p-4">No hay cotizaciones guardadas.</div>
+          ) : (
+            <div className="border rounded overflow-hidden">
+              <div className="grid grid-cols-12 gap-2 bg-gray-50 text-xs font-bold text-gray-600 px-3 py-2">
+                <div className="col-span-3">Cliente</div>
+                <div className="col-span-3">Servicio</div>
+                <div className="col-span-2">Total</div>
+                <div className="col-span-2">Fecha</div>
+                <div className="col-span-2 text-right">Acciones</div>
+              </div>
+              {quotes.slice(0, 20).map((q) => (
+                <div key={q.id} className="grid grid-cols-12 gap-2 px-3 py-2 text-sm border-t items-center">
+                  <div className="col-span-3">
+                    <div className="font-semibold text-navy-900">{q.client}</div>
+                    <div className="text-xs text-gray-500">{q.phone || ''}</div>
+                  </div>
+                  <div className="col-span-3">
+                    <div className="font-semibold">{q.serviceName}</div>
+                    <div className="text-xs text-gray-500">{q.quantity} {q.unit || ''}</div>
+                  </div>
+                  <div className="col-span-2 font-bold text-mustard-600">Q{Number(q.total ?? 0).toFixed(2)}</div>
+                  <div className="col-span-2 text-xs text-gray-500">{new Date(q.createdAt).toLocaleString()}</div>
+                  <div className="col-span-2 flex justify-end gap-2">
+                    <button
+                      onClick={() => handleLoadQuote(q)}
+                      className="px-3 py-2 text-xs font-bold rounded bg-navy-900 text-white hover:bg-navy-800"
+                    >
+                      Cargar
+                    </button>
+                    <button
+                      onClick={() => handleDeleteFromHistory(q.id)}
+                      className="px-3 py-2 text-xs font-bold rounded border hover:bg-gray-50 text-red-700 flex items-center gap-1"
+                      title="Eliminar"
+                    >
+                      <Trash2 size={14} />
+                      Eliminar
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

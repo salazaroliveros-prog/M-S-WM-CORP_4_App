@@ -30,7 +30,7 @@ interface Props {
   projects: Project[];
   useCloud?: boolean;
   orgId?: string | null;
-  onLoadBudget?: (projectId: string) => Promise<{ indirectPct: string; lines: BudgetLine[] } | null>;
+  onLoadBudget?: (projectId: string) => Promise<{ typology?: string; indirectPct: string; lines: BudgetLine[] } | null>;
   onLoadProgress?: (projectId: string) => Promise<ProjectProgressPayload | null>;
   onSaveProgress?: (projectId: string, payload: ProjectProgressPayload) => Promise<void>;
 }
@@ -180,6 +180,8 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
   };
 
   const overallPct = useMemo(() => computeOverallPct(progressLines), [progressLines]);
+
+  const clamp01 = (n: number) => Math.max(0, Math.min(1, Number.isFinite(n) ? n : 0));
 
   useEffect(() => {
     if (!selectedProjectId) {
@@ -512,6 +514,83 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
 
     return { tasks, start: projectStart, end: projectEnd };
   }, [selectedProjectId, selectedProject, budgetLines]);
+
+  const evm = useMemo(() => {
+    if (!selectedProjectId) return null;
+    if (!selectedProject) return null;
+
+    const bac = Number(plannedBudgetSelected) || 0;
+    const earnedPct = clamp01(overallPct);
+    const ev = bac * earnedPct;
+
+    const ac = Math.max(0, Number(selectedProjectMetrics?.expenseTotal ?? 0) || 0);
+    const income = Math.max(0, Number(selectedProjectMetrics?.incomeTotal ?? 0) || 0);
+
+    // Planned % from schedule (Gantt start/end). If schedule is missing, PV is unknown.
+    let plannedPct: number | null = null;
+    let pv = 0;
+    if (gantt.start && gantt.end) {
+      const startDate = parseIsoDateOnly(gantt.start);
+      const endDate = parseIsoDateOnly(gantt.end);
+      if (startDate && endDate) {
+        const years = new Set<number>();
+        years.add(startDate.getFullYear());
+        years.add(endDate.getFullYear());
+        const cal = defaultWorkCalendarForYears(Array.from(years));
+
+        const totalWorking = Math.max(1, workingDaysBetweenInclusive(startDate, endDate, cal));
+        const today = new Date();
+        if (today <= startDate) {
+          plannedPct = 0;
+        } else if (today >= endDate) {
+          plannedPct = 1;
+        } else {
+          const elapsed = Math.max(0, workingDaysBetweenInclusive(startDate, today, cal));
+          plannedPct = clamp01(elapsed / totalWorking);
+        }
+
+        pv = bac * (plannedPct ?? 0);
+      }
+    }
+
+    const cpi = ac > 0 ? ev / ac : null;
+    const spi = pv > 0 ? ev / pv : null;
+    const cv = ev - ac;
+    const sv = ev - pv;
+
+    const margin = income - ac;
+    const marginPct = income > 0 ? margin / income : null;
+
+    const eac = cpi && Number.isFinite(cpi) && cpi > 0 ? bac / cpi : null;
+    const etc = eac && Number.isFinite(eac) ? Math.max(0, eac - ac) : null;
+
+    return {
+      bac,
+      pv,
+      ev,
+      ac,
+      cpi,
+      spi,
+      cv,
+      sv,
+      plannedPct,
+      earnedPct,
+      income,
+      margin,
+      marginPct,
+      eac,
+      etc,
+    };
+  }, [
+    selectedProjectId,
+    selectedProject,
+    plannedBudgetSelected,
+    overallPct,
+    gantt.start,
+    gantt.end,
+    selectedProjectMetrics?.expenseTotal,
+    selectedProjectMetrics?.incomeTotal,
+  ]);
 
   const loadTransactions = async () => {
     setMetricsError(null);
@@ -882,6 +961,53 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
                 <div className="text-2xl font-extrabold text-navy-900">{currency.format(selectedProjectMetrics?.monthIncome ?? 0)}</div>
               </div>
             </div>
+
+            {/* Rentabilidad + EVM (proyecto) */}
+            <div className="mt-4 grid grid-cols-1 lg:grid-cols-6 gap-4">
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                <div className="text-xs text-gray-500">AC (Costo real, total)</div>
+                <div className="text-xl font-extrabold text-navy-900">{currency.format(evm?.ac ?? 0)}</div>
+                <div className="text-xs text-gray-500 mt-1">(suma de gastos)</div>
+              </div>
+
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                <div className="text-xs text-gray-500">EV (Valor ganado)</div>
+                <div className="text-xl font-extrabold text-navy-900">{currency.format(evm?.ev ?? 0)}</div>
+                <div className="text-xs text-gray-500 mt-1">% ganado: {evm ? `${Math.round((evm.earnedPct ?? 0) * 100)}%` : '—'}</div>
+              </div>
+
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                <div className="text-xs text-gray-500">PV (Valor planificado)</div>
+                <div className="text-xl font-extrabold text-navy-900">{currency.format(evm?.pv ?? 0)}</div>
+                <div className="text-xs text-gray-500 mt-1">% plan: {evm?.plannedPct === null || evm?.plannedPct === undefined ? '—' : `${Math.round(evm.plannedPct * 100)}%`}</div>
+              </div>
+
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                <div className="text-xs text-gray-500">CPI</div>
+                <div className="text-xl font-extrabold text-navy-900">{evm?.cpi && Number.isFinite(evm.cpi) ? evm.cpi.toFixed(2) : '—'}</div>
+                <div className="text-xs text-gray-500 mt-1">{evm?.cv !== undefined ? `CV: ${currency.format(Math.round(evm.cv))}` : ''}</div>
+              </div>
+
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                <div className="text-xs text-gray-500">SPI</div>
+                <div className="text-xl font-extrabold text-navy-900">{evm?.spi && Number.isFinite(evm.spi) ? evm.spi.toFixed(2) : '—'}</div>
+                <div className="text-xs text-gray-500 mt-1">{evm?.sv !== undefined ? `SV: ${currency.format(Math.round(evm.sv))}` : ''}</div>
+              </div>
+
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                <div className="text-xs text-gray-500">Rentabilidad (total)</div>
+                <div className="text-xl font-extrabold text-navy-900">{currency.format(evm?.margin ?? 0)}</div>
+                <div className="text-xs text-gray-500 mt-1">Margen: {evm?.marginPct && Number.isFinite(evm.marginPct) ? `${Math.round(evm.marginPct * 100)}%` : '—'}</div>
+              </div>
+            </div>
+
+            {evm && (evm.eac !== null || evm.etc !== null) && (
+              <div className="mt-3 text-xs text-gray-500">
+                {evm.eac !== null ? `EAC: ${currency.format(Math.round(evm.eac))}` : 'EAC: —'}
+                {' · '}
+                {evm.etc !== null ? `ETC: ${currency.format(Math.round(evm.etc))}` : 'ETC: —'}
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

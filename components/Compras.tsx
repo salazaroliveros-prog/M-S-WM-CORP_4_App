@@ -8,6 +8,11 @@ interface Props {
   onLoadBudget?: (projectId: string) => Promise<{ lines: BudgetLine[] } | null>;
   onCreateRequisition?: (data: RequisitionData, supplierName: string | null) => Promise<void>;
   onListRequisitions?: () => Promise<Array<{ id: string; projectId: string | null; requestedAt: string; supplierName?: string | null; supplierNote?: string | null; total: number; status: string }>>;
+  onUpdateRequisitionStatus?: (requisitionId: string, status: 'sent' | 'confirmed' | 'received' | 'cancelled') => Promise<void>;
+  canApproveRequisitions?: boolean;
+  onListSuppliers?: () => Promise<Array<{ id: string; name: string; whatsapp?: string | null; phone?: string | null; defaultNoteTemplate?: string | null; termsTemplate?: string | null }> | null>;
+  onUpsertSupplier?: (input: { id?: string | null; name: string; whatsapp?: string | null; phone?: string | null; defaultNoteTemplate?: string | null; termsTemplate?: string | null }) => Promise<{ id: string } | null>;
+  onDeleteSupplier?: (supplierId: string) => Promise<void>;
 }
 
 type DerivedMaterial = {
@@ -138,7 +143,18 @@ const buildRequisitionMessage = (input: {
   return lines.join('\n');
 };
 
-const Compras: React.FC<Props> = ({ projects, initialData, onLoadBudget, onCreateRequisition, onListRequisitions }) => {
+const Compras: React.FC<Props> = ({
+  projects,
+  initialData,
+  onLoadBudget,
+  onCreateRequisition,
+  onListRequisitions,
+  onUpdateRequisitionStatus,
+  canApproveRequisitions,
+  onListSuppliers,
+  onUpsertSupplier,
+  onDeleteSupplier,
+}) => {
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [supplierName, setSupplierName] = useState('Cemaco');
   const [supplierPhone, setSupplierPhone] = useState('');
@@ -166,6 +182,68 @@ const Compras: React.FC<Props> = ({ projects, initialData, onLoadBudget, onCreat
 
   const [suppliers, setSuppliers] = useState<Supplier[]>(defaultSuppliers);
   const [selectedSupplierId, setSelectedSupplierId] = useState<string>('cemaco');
+
+  useEffect(() => {
+    if (!onListSuppliers) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await onListSuppliers();
+        if (cancelled) return;
+        const list = Array.isArray(rows) ? rows : [];
+        if (list.length > 0) {
+          const hydrated: Supplier[] = list
+            .filter(s => typeof (s as any)?.id === 'string' && typeof (s as any)?.name === 'string')
+            .map(s => ({
+              id: String((s as any).id),
+              name: String((s as any).name),
+              whatsappPhone: String((s as any).whatsapp ?? (s as any).phone ?? ''),
+              defaultNoteTemplate: String((s as any).defaultNoteTemplate ?? ''),
+              termsTemplate: String((s as any).termsTemplate ?? DEFAULT_TERMS),
+            }));
+          setSuppliers(hydrated);
+          setSelectedSupplierId(hydrated[0]?.id || '');
+          return;
+        }
+
+        // If cloud has no suppliers yet, seed defaults (best effort)
+        if (onUpsertSupplier) {
+          for (const s of defaultSuppliers) {
+            try {
+              await onUpsertSupplier({
+                name: s.name,
+                whatsapp: s.whatsappPhone || null,
+                defaultNoteTemplate: s.defaultNoteTemplate || null,
+                termsTemplate: s.termsTemplate || DEFAULT_TERMS,
+              });
+            } catch {
+              // ignore
+            }
+          }
+          const seeded = await onListSuppliers();
+          if (cancelled) return;
+          const seededList = Array.isArray(seeded) ? seeded : [];
+          if (seededList.length > 0) {
+            const hydrated: Supplier[] = seededList.map(s => ({
+              id: String((s as any).id),
+              name: String((s as any).name),
+              whatsappPhone: String((s as any).whatsapp ?? (s as any).phone ?? ''),
+              defaultNoteTemplate: String((s as any).defaultNoteTemplate ?? ''),
+              termsTemplate: String((s as any).termsTemplate ?? DEFAULT_TERMS),
+            }));
+            setSuppliers(hydrated);
+            setSelectedSupplierId(hydrated[0]?.id || '');
+          }
+        }
+      } catch {
+        // ignore and keep local
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [onListSuppliers, onUpsertSupplier, defaultSuppliers]);
 
   useEffect(() => {
     try {
@@ -311,6 +389,29 @@ const Compras: React.FC<Props> = ({ projects, initialData, onLoadBudget, onCreat
 
   const [history, setHistory] = useState<Array<{ id: string; projectId: string | null; requestedAt: string; supplierName?: string | null; supplierNote?: string | null; total: number; status: string }>>([]);
 
+  const statusLabel = (s: string) => {
+    const v = String(s || '').toLowerCase();
+    if (v === 'draft') return 'BORRADOR';
+    if (v === 'sent') return 'ENVIADO';
+    if (v === 'confirmed') return 'APROBADO';
+    if (v === 'received') return 'RECIBIDO';
+    if (v === 'cancelled') return 'CANCELADO';
+    return String(s || '').toUpperCase();
+  };
+
+  const handleStatusAction = async (requisitionId: string, nextStatus: 'sent' | 'confirmed' | 'received' | 'cancelled') => {
+    if (!onUpdateRequisitionStatus) return;
+    try {
+      await onUpdateRequisitionStatus(requisitionId, nextStatus);
+      if (onListRequisitions) {
+        const res = await onListRequisitions();
+        setHistory(res);
+      }
+    } catch (e: any) {
+      alert(e?.message || 'No se pudo actualizar el estado.');
+    }
+  };
+
   const visibleHistory = useMemo(() => {
     if (!selectedProjectId) return history;
     return history.filter((h) => String(h.projectId || '') === String(selectedProjectId));
@@ -387,7 +488,7 @@ const Compras: React.FC<Props> = ({ projects, initialData, onLoadBudget, onCreat
     setIsSupplierModalOpen(true);
   };
 
-  const saveSupplier = () => {
+  const saveSupplier = async () => {
     const name = supplierDraftName.trim();
     const phone = supplierDraftPhone.trim();
     const defaultNoteTemplate = supplierDraftNoteTemplate;
@@ -403,7 +504,42 @@ const Compras: React.FC<Props> = ({ projects, initialData, onLoadBudget, onCreat
       setSupplierName(name);
       setSupplierPhone(phone);
       setIsSupplierModalOpen(false);
+
+      if (onUpsertSupplier) {
+        try {
+          await onUpsertSupplier({
+            id: editingSupplierId,
+            name,
+            whatsapp: phone || null,
+            defaultNoteTemplate: defaultNoteTemplate || null,
+            termsTemplate: termsTemplate || DEFAULT_TERMS,
+          });
+        } catch {
+          // ignore cloud failure; local already updated
+        }
+      }
       return;
+    }
+
+    if (onUpsertSupplier) {
+      try {
+        const created = await onUpsertSupplier({
+          name,
+          whatsapp: phone || null,
+          defaultNoteTemplate: defaultNoteTemplate || null,
+          termsTemplate: termsTemplate || DEFAULT_TERMS,
+        });
+        const newId = created?.id ? String(created.id) : crypto.randomUUID();
+        const next: Supplier = { id: newId, name, whatsappPhone: phone, defaultNoteTemplate, termsTemplate };
+        setSuppliers(prev => [next, ...prev]);
+        setSelectedSupplierId(newId);
+        setSupplierName(name);
+        setSupplierPhone(phone);
+        setIsSupplierModalOpen(false);
+        return;
+      } catch {
+        // fall through to local-only create
+      }
     }
 
     const newId = crypto.randomUUID();
@@ -429,6 +565,22 @@ const Compras: React.FC<Props> = ({ projects, initialData, onLoadBudget, onCreat
     const ok = confirm('¿Guardar las observaciones actuales como plantilla del proveedor?');
     if (!ok) return;
     setSuppliers(prev => prev.map(s => (s.id === selectedSupplier.id ? ({ ...s, defaultNoteTemplate: supplierNote }) : s)));
+
+    if (onUpsertSupplier) {
+      void (async () => {
+        try {
+          await onUpsertSupplier({
+            id: selectedSupplier.id,
+            name: selectedSupplier.name,
+            whatsapp: selectedSupplier.whatsappPhone || null,
+            defaultNoteTemplate: supplierNote || null,
+            termsTemplate: (selectedSupplier.termsTemplate || DEFAULT_TERMS) as any,
+          });
+        } catch {
+          // ignore
+        }
+      })();
+    }
   };
 
   const deleteSupplier = () => {
@@ -440,6 +592,16 @@ const Compras: React.FC<Props> = ({ projects, initialData, onLoadBudget, onCreat
     const next = suppliers.filter(x => x.id !== editingSupplierId);
     setSelectedSupplierId(next[0]?.id || '');
     setIsSupplierModalOpen(false);
+
+    if (onDeleteSupplier) {
+      void (async () => {
+        try {
+          await onDeleteSupplier(editingSupplierId);
+        } catch {
+          // ignore
+        }
+      })();
+    }
   };
 
   useEffect(() => {
@@ -843,12 +1005,13 @@ const Compras: React.FC<Props> = ({ projects, initialData, onLoadBudget, onCreat
                 <th className="p-3">Proveedor</th>
                 <th className="p-3">Total</th>
                 <th className="p-3">Estado</th>
+                {onUpdateRequisitionStatus && <th className="p-3">Acciones</th>}
               </tr>
             </thead>
             <tbody>
               {visibleHistory.length === 0 ? (
                 <tr>
-                  <td className="p-3" colSpan={4}>
+                  <td className="p-3" colSpan={onUpdateRequisitionStatus ? 5 : 4}>
                     <span className="text-gray-400 italic">Sin historial aún.</span>
                   </td>
                 </tr>
@@ -858,7 +1021,43 @@ const Compras: React.FC<Props> = ({ projects, initialData, onLoadBudget, onCreat
                     <td className="p-3">{new Date(h.requestedAt).toLocaleDateString()}</td>
                     <td className="p-3">{h.supplierName || h.supplierNote || '-'}</td>
                     <td className="p-3">Q{h.total.toFixed(2)}</td>
-                    <td className="p-3"><span className="text-gray-700 font-bold">{String(h.status).toUpperCase()}</span></td>
+                    <td className="p-3"><span className="text-gray-700 font-bold">{statusLabel(h.status)}</span></td>
+                    {onUpdateRequisitionStatus && (
+                      <td className="p-3">
+                        <div className="flex flex-wrap gap-2">
+                          {(String(h.status).toLowerCase() === 'sent' && canApproveRequisitions) && (
+                            <button
+                              type="button"
+                              onClick={() => handleStatusAction(h.id, 'confirmed')}
+                              className="text-xs px-3 py-1 rounded bg-gray-200 hover:bg-gray-300"
+                              title="Aprobar requisición"
+                            >
+                              Aprobar
+                            </button>
+                          )}
+                          {(String(h.status).toLowerCase() === 'confirmed' && canApproveRequisitions) && (
+                            <button
+                              type="button"
+                              onClick={() => handleStatusAction(h.id, 'received')}
+                              className="text-xs px-3 py-1 rounded bg-gray-200 hover:bg-gray-300"
+                              title="Marcar como recibido"
+                            >
+                              Recibido
+                            </button>
+                          )}
+                          {(['draft', 'sent', 'confirmed'].includes(String(h.status).toLowerCase())) && (
+                            <button
+                              type="button"
+                              onClick={() => handleStatusAction(h.id, 'cancelled')}
+                              className="text-xs px-3 py-1 rounded bg-white border hover:bg-gray-50"
+                              title="Cancelar requisición"
+                            >
+                              Cancelar
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))
               )}

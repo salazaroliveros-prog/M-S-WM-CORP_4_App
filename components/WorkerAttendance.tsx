@@ -49,6 +49,18 @@ const WorkerAttendance: React.FC = () => {
 
   const canUseGeolocation = typeof navigator !== 'undefined' && !!navigator.geolocation;
 
+  const isStandalone = useMemo(() => {
+    try {
+      const w = window as any;
+      const iosStandalone = typeof w?.navigator?.standalone === 'boolean' ? Boolean(w.navigator.standalone) : false;
+      const mql = typeof window.matchMedia === 'function' ? window.matchMedia('(display-mode: standalone)') : null;
+      const standalone = Boolean(mql?.matches);
+      return iosStandalone || standalone;
+    } catch {
+      return false;
+    }
+  }, []);
+
   const deviceInfo = useMemo(() => {
     try {
       return {
@@ -79,6 +91,14 @@ const WorkerAttendance: React.FC = () => {
       setBiometricMode('code');
     }
   }, [biometricMode, isWebAuthnUsable]);
+
+  useEffect(() => {
+    // Reduce friction: prompt for GPS as soon as the worker opens the app.
+    if (geo.status === 'idle' && canUseGeolocation) {
+      requestLocation();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const refreshWebauthnStatus = async () => {
     if (!isWebAuthnUsable) {
@@ -245,6 +265,15 @@ const WorkerAttendance: React.FC = () => {
             </button>
           </div>
 
+          {!isStandalone && (
+            <div className="mt-3 text-xs bg-gray-50 border rounded p-2">
+              <div className="font-semibold text-gray-700">Instalar app (recomendado)</div>
+              <div className="text-gray-600">
+                Si tu navegador muestra “Instalar” o “Agregar a la pantalla de inicio”, selecciónalo para usar la app como aplicación.
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
             <div>
               <label className="block text-xs text-gray-600 mb-1" htmlFor="wa-date">Fecha *</label>
@@ -380,6 +409,12 @@ const WorkerAttendance: React.FC = () => {
             <div className="mt-4 text-xs text-gray-600">
               Último registro: {lastResult.work_date ?? ''} • {lastResult.check_in ? `Entrada: ${new Date(lastResult.check_in).toLocaleTimeString()}` : ''}{' '}
               {lastResult.check_out ? `• Salida: ${new Date(lastResult.check_out).toLocaleTimeString()}` : ''}
+              {(lastResult.location_lat != null || lastResult.location_lng != null) && (
+                <span>
+                  {' '}• GPS: {Number(lastResult.location_lat).toFixed(6)}, {Number(lastResult.location_lng).toFixed(6)}
+                  {lastResult.accuracy_m ? ` (±${Math.round(Number(lastResult.accuracy_m))}m)` : ''}
+                </span>
+              )}
             </div>
           )}
         </div>

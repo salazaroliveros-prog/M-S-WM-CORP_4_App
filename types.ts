@@ -96,3 +96,16 @@ export interface QuoteInitialData {
   clientName: string;
   address: string;
 }
+
+export interface AuditLog {
+  id: string;
+  orgId: string;
+  projectId?: string | null;
+  actorUserId: string;
+  action: 'INSERT' | 'UPDATE' | 'DELETE' | string;
+  tableName: string;
+  recordId?: string | null;
+  oldSnapshot?: any;
+  newSnapshot?: any;
+  createdAt: string;
+}

@@ -44,6 +44,7 @@ describe('Presupuestos: budgets CRUD via lib/db (integration)', () => {
 
       const loaded = await loadBudgetForProject(orgId, projectId);
       expect(loaded).toBeTruthy();
+      expect(String(loaded!.typology)).toBe('RESIDENCIAL');
       expect(String(loaded!.indirectPct)).toBe('35');
       expect(loaded!.lines.length).toBeGreaterThanOrEqual(2);
 
