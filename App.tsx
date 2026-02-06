@@ -65,6 +65,25 @@ const App: React.FC = () => {
   });
   const useCloud = cloudMode === 'supabase';
 
+  const scopeKey = useCloud && orgId ? `org_${orgId}` : 'local';
+  const projectsCacheKey = (scope: string) => (scope === 'local' ? 'projects' : `wm_projects_v1_${scope}`);
+  const lastCloudProjectsKey = () => 'wm_projects_v1_last_cloud';
+
+  const budgetCacheKey = (scope: string, projectId: string) => `wm_budget_v1_${scope}_${projectId}`;
+  const progressCacheKey = (scope: string, projectId: string) => `wm_progress_v1_${scope}_${projectId}`;
+  const progressCompatKey = (projectId: string) => `wm_progress_v1_${projectId}`;
+  const requisitionsCacheKey = (scope: string) => `wm_requisitions_v1_${scope}`;
+  const txCacheKey = (scope: string) => `wm_transactions_v1_${scope}`;
+
+  const safeJsonParse = <T,>(raw: string | null): T | null => {
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      return null;
+    }
+  };
+
   // Global State (Mocking a database)
   const [projects, setProjects] = useState<Project[]>([]);
   
@@ -77,22 +96,33 @@ const App: React.FC = () => {
   // State to handle navigation from Proyectos to Cotizador with client data
   const [quoteInitialData, setQuoteInitialData] = useState<QuoteInitialData | null>(null);
   
-  // Initialize from LocalStorage
+  // Load cached projects (both local mode and cloud mode).
   useEffect(() => {
-    if (!useCloud) {
-      const savedProjects = localStorage.getItem('projects');
-      if (savedProjects) {
-        setProjects(JSON.parse(savedProjects));
+    try {
+      const cached = safeJsonParse<Project[]>(localStorage.getItem(projectsCacheKey(scopeKey)));
+      if (cached && Array.isArray(cached)) {
+        setProjects(cached);
+        return;
       }
+      if (useCloud) {
+        const last = safeJsonParse<Project[]>(localStorage.getItem(lastCloudProjectsKey()));
+        if (last && Array.isArray(last)) setProjects(last);
+      }
+    } catch {
+      // ignore
     }
-  }, [useCloud]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopeKey]);
 
-  // Save to LocalStorage
+  // Persist projects to cache for offline/fast boot (even when using Supabase).
   useEffect(() => {
-    if (!useCloud) {
-      localStorage.setItem('projects', JSON.stringify(projects));
+    try {
+      localStorage.setItem(projectsCacheKey(scopeKey), JSON.stringify(projects));
+      if (useCloud) localStorage.setItem(lastCloudProjectsKey(), JSON.stringify(projects));
+    } catch {
+      // ignore
     }
-  }, [projects, useCloud]);
+  }, [projects, scopeKey, useCloud]);
 
   const refreshProjects = async (targetOrgId: string) => {
     if (!useCloud) return;
@@ -176,31 +206,116 @@ const App: React.FC = () => {
   };
 
   const handleCreateTransaction = async (tx: any) => {
-    if (!useCloud || !orgId) {
-      // Keep existing local behavior (Inicio already writes localStorage), so no-op here.
-      return;
+    // Always persist locally so Dashboard/Seguimiento can work offline.
+    try {
+      const raw = localStorage.getItem('transactions');
+      const prev = raw ? JSON.parse(raw) : [];
+      localStorage.setItem('transactions', JSON.stringify([...(Array.isArray(prev) ? prev : []), tx]));
+      const scopeRaw = localStorage.getItem(txCacheKey(scopeKey));
+      const scopePrev = scopeRaw ? JSON.parse(scopeRaw) : [];
+      localStorage.setItem(txCacheKey(scopeKey), JSON.stringify([...(Array.isArray(scopePrev) ? scopePrev : []), tx]));
+    } catch {
+      // ignore
     }
+
+    if (!useCloud || !orgId) return;
     await dbCreateTransaction(orgId, tx);
   };
 
   const handleLoadBudget = async (projectId: string) => {
-    if (!useCloud || !orgId) return null;
-    return await loadBudgetForProject(orgId, projectId);
+    const readLocal = () => {
+      const cached = safeJsonParse<any>(localStorage.getItem(budgetCacheKey(scopeKey, projectId)));
+      if (cached && Array.isArray(cached.lines)) {
+        return { indirectPct: String(cached.indirectPct ?? '35'), lines: cached.lines };
+      }
+      return null;
+    };
+
+    if (!useCloud || !orgId) {
+      return readLocal();
+    }
+
+    try {
+      const remote = await loadBudgetForProject(orgId, projectId);
+      if (remote) {
+        try {
+          localStorage.setItem(
+            budgetCacheKey(scopeKey, projectId),
+            JSON.stringify({ ...remote, savedAt: new Date().toISOString() })
+          );
+        } catch {}
+        return remote;
+      }
+      return readLocal();
+    } catch {
+      const local = readLocal();
+      if (local) return local;
+      throw new Error('Error cargando presupuesto (sin caché local disponible).');
+    }
   };
 
   const handleSaveBudget = async (projectId: string, typology: string, indirectPct: string, lines: any[]) => {
+    // Always cache locally (offline-first).
+    try {
+      localStorage.setItem(
+        budgetCacheKey(scopeKey, projectId),
+        JSON.stringify({ typology, indirectPct, lines, savedAt: new Date().toISOString() })
+      );
+    } catch {
+      // ignore
+    }
+
     if (!useCloud || !orgId) return;
-    await saveBudgetForProject(orgId, projectId, typology, indirectPct, lines as any);
+    try {
+      await saveBudgetForProject(orgId, projectId, typology, indirectPct, lines as any);
+    } catch (e: any) {
+      throw new Error(`Guardado local OK, pero falló Supabase: ${e?.message || 'error desconocido'}`);
+    }
   };
 
   const handleLoadProgress = async (projectId: string) => {
-    if (!useCloud || !orgId) return null;
-    return await loadProgressForProject(orgId, projectId);
+    const readLocal = () => {
+      const cached =
+        safeJsonParse<any>(localStorage.getItem(progressCacheKey(scopeKey, projectId))) ??
+        safeJsonParse<any>(localStorage.getItem(progressCompatKey(projectId)));
+      if (cached && Array.isArray(cached.lines)) return cached;
+      return null;
+    };
+
+    if (!useCloud || !orgId) return readLocal();
+
+    try {
+      const remote = await loadProgressForProject(orgId, projectId);
+      if (remote) {
+        try {
+          localStorage.setItem(progressCompatKey(projectId), JSON.stringify(remote));
+          localStorage.setItem(progressCacheKey(scopeKey, projectId), JSON.stringify(remote));
+        } catch {}
+        return remote;
+      }
+      return readLocal();
+    } catch {
+      const local = readLocal();
+      if (local) return local;
+      throw new Error('Error cargando avance (sin caché local disponible).');
+    }
   };
 
   const handleSaveProgress = async (projectId: string, payload: any) => {
+    // Always cache locally so offline mode works.
+    try {
+      localStorage.setItem(progressCompatKey(projectId), JSON.stringify(payload));
+      localStorage.setItem(progressCacheKey(scopeKey, projectId), JSON.stringify(payload));
+    } catch {
+      // ignore
+    }
+
     if (!useCloud || !orgId) return;
-    await saveProgressForProject(orgId, projectId, payload);
+    try {
+      await saveProgressForProject(orgId, projectId, payload);
+    } catch (e: any) {
+      throw new Error(`Avance guardado local, pero falló Supabase: ${e?.message || 'error desconocido'}`);
+    }
   };
 
   const handleImportMaterialPrices = async (input: { url: string; vendor: string; currency: string }) => {
@@ -234,6 +349,33 @@ const App: React.FC = () => {
   };
 
   const handleCreateRequisition = async (data: RequisitionData, supplierName: string | null) => {
+    const localAdd = () => {
+      const total = (data.items ?? []).reduce((sum, it: any) => {
+        const qty = Number(it?.quantity ?? 0) || 0;
+        return sum + Math.max(0, qty);
+      }, 0);
+      const row = {
+        id: crypto.randomUUID(),
+        projectId: data.projectId ?? null,
+        requestedAt: new Date().toISOString(),
+        supplierName: supplierName ?? null,
+        supplierNote: data.sourceLineName ? `Renglón presupuesto: ${String(data.sourceLineName)}` : null,
+        total,
+        status: 'sent',
+      };
+      try {
+        const raw = localStorage.getItem(requisitionsCacheKey(scopeKey));
+        const prev = raw ? JSON.parse(raw) : [];
+        const next = [row, ...(Array.isArray(prev) ? prev : [])].slice(0, 50);
+        localStorage.setItem(requisitionsCacheKey(scopeKey), JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+    };
+
+    // Always record locally first.
+    localAdd();
+
     if (!useCloud || !orgId) return;
     await createRequisition(
       orgId,
@@ -247,8 +389,23 @@ const App: React.FC = () => {
   };
 
   const handleListRequisitions = async () => {
-    if (!useCloud || !orgId) return [];
-    return await listRequisitions(orgId);
+    const readLocal = () => {
+      const cached = safeJsonParse<any[]>(localStorage.getItem(requisitionsCacheKey(scopeKey)));
+      if (!cached || !Array.isArray(cached)) return [];
+      return cached;
+    };
+
+    if (!useCloud || !orgId) return readLocal();
+
+    try {
+      const rows = await listRequisitions(orgId);
+      try {
+        localStorage.setItem(requisitionsCacheKey(scopeKey), JSON.stringify(rows));
+      } catch {}
+      return rows;
+    } catch {
+      return readLocal();
+    }
   };
 
   const handleListEmployees = async () => {
