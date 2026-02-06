@@ -286,6 +286,36 @@ export async function setCachedUrlText(url: string, text: string): Promise<void>
   await storageSet(key, { text: String(text ?? ''), savedAt: nowIso() });
 }
 
+export async function getOfflineMaterialUnitPrice(input: { name: string; unit?: string | null }): Promise<number | null> {
+  const catalog = await loadOfflineCatalog();
+  const name = String(input.name || '').trim();
+  if (!name) return null;
+
+  const nameNorm = normalizeText(name);
+  if (!nameNorm) return null;
+
+  const unit = String(input.unit ?? '').trim();
+  if (unit) {
+    const key = materialKey(nameNorm, unit);
+    const exact = catalog.materialPrices.find((p) => materialKey(p.nameNorm, p.unit) === key);
+    const price = exact?.unitPrice;
+    return typeof price === 'number' && Number.isFinite(price) && price >= 0 ? price : null;
+  }
+
+  // If unit is unknown, pick the most recently updated entry for that name.
+  let best: OfflineMaterialPrice | null = null;
+  for (const p of catalog.materialPrices) {
+    if (p.nameNorm !== nameNorm) continue;
+    if (!best) {
+      best = p;
+      continue;
+    }
+    if (String(p.updatedAt || '') > String(best.updatedAt || '')) best = p;
+  }
+  const price = best?.unitPrice;
+  return typeof price === 'number' && Number.isFinite(price) && price >= 0 ? price : null;
+}
+
 export async function upsertMaterialPricesFromCsvText(input: {
   csvText: string;
   vendor?: string;

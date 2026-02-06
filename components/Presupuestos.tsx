@@ -7,6 +7,7 @@ import autoTable from 'jspdf-autotable';
 import {
   getCachedUrlText,
   setCachedUrlText,
+  getOfflineMaterialUnitPrice,
   suggestLineFromOfflineCatalog,
   upsertApuTemplatesFromCsvText,
   upsertApuTemplatesFromJsonText,
@@ -659,6 +660,44 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
     return unitDirectCost * line.quantity;
   };
 
+  const applyOfflinePricesAndRecalcAll = async (): Promise<{ pricesUpdated: number; linesRecalced: number }> => {
+    let pricesUpdated = 0;
+    let linesRecalced = 0;
+
+    const nextLines = await Promise.all(
+      budgetLines.map(async (line) => {
+        let anyChanged = false;
+
+        const nextMaterials = await Promise.all(
+          (line.materials || []).map(async (m) => {
+            try {
+              const p = await getOfflineMaterialUnitPrice({ name: m.name, unit: m.unit });
+              if (typeof p === 'number' && Number.isFinite(p) && p >= 0 && p !== m.unitPrice) {
+                pricesUpdated++;
+                anyChanged = true;
+                return { ...m, unitPrice: p };
+              }
+            } catch {
+              // ignore lookup errors
+            }
+            return m;
+          })
+        );
+
+        const updatedLine: BudgetLine = anyChanged ? { ...line, materials: nextMaterials } : line;
+        const nextDirectCost = calculateLineTotal(updatedLine);
+        if (nextDirectCost !== updatedLine.directCost) {
+          linesRecalced++;
+          return { ...updatedLine, directCost: nextDirectCost };
+        }
+        return updatedLine;
+      })
+    );
+
+    setBudgetLines(nextLines);
+    return { pricesUpdated, linesRecalced };
+  };
+
   const handleAddNextLine = async () => {
     if (!typology || !DEFAULT_BUDGET_LINES[typology]) return;
 
@@ -878,12 +917,16 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
         }
         const csvText = await priceImportFile.text();
         const localRes = await upsertMaterialPricesFromCsvText({ csvText, vendor, currency, sourceUrl: null });
+        const recalc = await applyOfflinePricesAndRecalcAll();
         let supaMsg = '';
         if (onImportMaterialPricesText) {
           const r = await onImportMaterialPricesText({ csvText, vendor, currency });
           supaMsg = ` Supabase: Materiales ${r.materialsUpserted}, Precios ${r.quotesUpserted}.`;
         }
-        setImportStatus({ type: 'success', message: `Biblioteca local actualizada: ${localRes.itemsUpserted} precios.${supaMsg}` });
+        setImportStatus({
+          type: 'success',
+          message: `Biblioteca local actualizada: ${localRes.itemsUpserted} precios. Recalculado: ${recalc.linesRecalced} renglones, precios aplicados: ${recalc.pricesUpdated}.${supaMsg}`
+        });
         saveImportPrefs({ priceVendor: vendor, priceCurrency: currency });
         setPriceImportOpen(false);
         return;
@@ -895,6 +938,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
       const normalized = toPublicGoogleSheetsCsvUrl(priceImportUrl.trim());
       const { text: csvText, fromCache } = await fetchCsvText(normalized);
       const localRes = await upsertMaterialPricesFromCsvText({ csvText, vendor, currency, sourceUrl: normalized });
+      const recalc = await applyOfflinePricesAndRecalcAll();
 
       let supaMsg = '';
       if (onImportMaterialPricesText) {
@@ -907,7 +951,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
 
       setImportStatus({
         type: 'success',
-        message: `Biblioteca local: ${localRes.itemsUpserted} precios (${fromCache ? 'desde caché' : 'descargado'}).${supaMsg}`
+        message: `Biblioteca local: ${localRes.itemsUpserted} precios (${fromCache ? 'desde caché' : 'descargado'}). Recalculado: ${recalc.linesRecalced} renglones, precios aplicados: ${recalc.pricesUpdated}.${supaMsg}`
       });
       saveImportPrefs({ priceUrl: normalized, priceVendor: vendor, priceCurrency: currency });
       setPriceImportOpen(false);
@@ -942,6 +986,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
         }
         const csvText = await apuImportFile.text();
         const localRes = await upsertApuTemplatesFromCsvText({ csvText, source, currency, sourceUrl: null });
+        const recalc = await applyOfflinePricesAndRecalcAll();
 
         let supaMsg = '';
         if (onImportApuTemplatesCsvText) {
@@ -949,7 +994,10 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
           supaMsg = ` Supabase: ${r.templatesUpserted} plantillas.`;
         }
 
-        setImportStatus({ type: 'success', message: `Biblioteca local: ${localRes.templatesUpserted} plantillas.${supaMsg}` });
+        setImportStatus({
+          type: 'success',
+          message: `Biblioteca local: ${localRes.templatesUpserted} plantillas. Recalculado: ${recalc.linesRecalced} renglones, precios aplicados: ${recalc.pricesUpdated}.${supaMsg}`
+        });
         saveImportPrefs({ apuSource: apuImportSource.trim(), apuCurrency: currency, apuFormat: apuImportFormat });
         setApuImportOpen(false);
         return;
@@ -965,6 +1013,8 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
       const localRes = apuImportFormat === 'csv'
         ? await upsertApuTemplatesFromCsvText({ csvText: text, source, currency, sourceUrl: normalized })
         : await upsertApuTemplatesFromJsonText({ jsonText: text, source, currency, sourceUrl: normalized });
+
+      const recalc = await applyOfflinePricesAndRecalcAll();
 
       let supaMsg = '';
       if (apuImportFormat === 'csv') {
@@ -987,7 +1037,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, onQuickBuy,
 
       setImportStatus({
         type: 'success',
-        message: `Biblioteca local: ${localRes.templatesUpserted} plantillas (${fromCache ? 'desde caché' : 'descargado'}).${supaMsg}`
+        message: `Biblioteca local: ${localRes.templatesUpserted} plantillas (${fromCache ? 'desde caché' : 'descargado'}). Recalculado: ${recalc.linesRecalced} renglones, precios aplicados: ${recalc.pricesUpdated}.${supaMsg}`
       });
       saveImportPrefs({ apuUrl: normalized, apuSource: apuImportSource.trim(), apuCurrency: (apuImportCurrency || 'GTQ').trim(), apuFormat: apuImportFormat });
       setApuImportOpen(false);
