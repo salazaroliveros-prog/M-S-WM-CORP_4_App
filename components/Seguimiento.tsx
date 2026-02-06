@@ -143,6 +143,27 @@ const snapPct = (n: number) => {
 const leftPctClass = (pct: number) => LEFT_PCT_CLASSES[Math.round(snapPct(pct) / SNAP_PCT)] ?? 'left-[0%]';
 const widthPctClass = (pct: number) => WIDTH_PCT_CLASSES[Math.round(snapPct(pct) / SNAP_PCT)] ?? 'w-[0%]';
 
+const useElementWidth = (ref: React.RefObject<HTMLElement | null>) => {
+  const [width, setWidth] = useState(0);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect?.width;
+      if (typeof w === 'number' && Number.isFinite(w)) setWidth(Math.round(w));
+    });
+
+    ro.observe(el);
+    setWidth(Math.round(el.getBoundingClientRect().width || 0));
+
+    return () => ro.disconnect();
+  }, [ref]);
+
+  return width;
+};
+
 const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null, syncVersion, onLoadBudget, onLoadProgress, onSaveProgress }) => {
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [budgetLines, setBudgetLines] = useState<BudgetLine[]>([]);
@@ -154,6 +175,21 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
   const [summaryByProjectId, setSummaryByProjectId] = useState<Record<string, number>>({});
   const [plannedBudgetByProjectId, setPlannedBudgetByProjectId] = useState<Record<string, number>>({});
   const [projectSearch, setProjectSearch] = useState('');
+
+  const topBarsWrapRef = useRef<HTMLDivElement | null>(null);
+  const topBarsWrapWidth = useElementWidth(topBarsWrapRef);
+
+  const globalLineWrapRef = useRef<HTMLDivElement | null>(null);
+  const globalLineWrapWidth = useElementWidth(globalLineWrapRef);
+
+  const globalPieWrapRef = useRef<HTMLDivElement | null>(null);
+  const globalPieWrapWidth = useElementWidth(globalPieWrapRef);
+
+  const projectLineWrapRef = useRef<HTMLDivElement | null>(null);
+  const projectLineWrapWidth = useElementWidth(projectLineWrapRef);
+
+  const projectPieWrapRef = useRef<HTMLDivElement | null>(null);
+  const projectPieWrapWidth = useElementWidth(projectPieWrapRef);
 
   const [transactions, setTransactions] = useState<TxRow[]>([]);
   const [metricsError, setMetricsError] = useState<string | null>(null);
@@ -920,11 +956,19 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
           <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-white p-4 rounded-lg border border-gray-200">
               <div className="font-bold text-gray-700 mb-2">Ingresos vs Gastos (6 meses, global)</div>
-              <div className="h-64">
+              <div className="h-64" ref={globalLineWrapRef}>
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={globalMetrics.lineData}>
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="name" />
+                    <XAxis
+                      dataKey="name"
+                      interval={globalLineWrapWidth > 0 && globalLineWrapWidth < 380 ? 1 : 0}
+                      angle={globalLineWrapWidth > 0 && globalLineWrapWidth < 420 ? -30 : 0}
+                      textAnchor={globalLineWrapWidth > 0 && globalLineWrapWidth < 420 ? 'end' : 'middle'}
+                      height={globalLineWrapWidth > 0 && globalLineWrapWidth < 420 ? 50 : 30}
+                      minTickGap={10}
+                      tick={{ fontSize: globalLineWrapWidth > 0 && globalLineWrapWidth < 420 ? 10 : 12 }}
+                    />
                     <YAxis />
                     <Tooltip formatter={(v: any) => currency.format(Number(v) || 0)} />
                     <Legend />
@@ -937,10 +981,27 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
 
             <div className="bg-white p-4 rounded-lg border border-gray-200">
               <div className="font-bold text-gray-700 mb-2">¿En qué se gasta? (global)</div>
-              <div className="h-64">
+              <div className="h-64" ref={globalPieWrapRef}>
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
-                    <Pie data={globalMetrics.expensePie} dataKey="value" nameKey="name" outerRadius={90} label>
+                    <Pie
+                      data={globalMetrics.expensePie}
+                      dataKey="value"
+                      nameKey="name"
+                      outerRadius={90}
+                      labelLine={false}
+                      label={(() => {
+                        const sliceCount = (globalMetrics.expensePie ?? []).length;
+                        const tight = globalPieWrapWidth > 0 && globalPieWrapWidth < 420;
+                        if (tight || sliceCount > 6) return false;
+                        return ({ name, percent }: any) => {
+                          const p = Number(percent) || 0;
+                          if (p < 0.08) return '';
+                          const shortName = String(name || '').length > 10 ? `${String(name || '').slice(0, 10)}…` : String(name || '');
+                          return `${shortName} ${Math.round(p * 100)}%`;
+                        };
+                      })()}
+                    >
                       {globalMetrics.expensePie.map((_, index) => (
                         <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                       ))}
@@ -1096,11 +1157,19 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-white p-4 rounded-xl shadow border border-gray-200">
               <div className="font-bold text-gray-700 mb-2">Ingresos vs Gastos (6 meses, proyecto)</div>
-              <div className="h-64">
+              <div className="h-64" ref={projectLineWrapRef}>
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={selectedProjectMetrics?.lineData ?? []}>
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="name" />
+                    <XAxis
+                      dataKey="name"
+                      interval={projectLineWrapWidth > 0 && projectLineWrapWidth < 380 ? 1 : 0}
+                      angle={projectLineWrapWidth > 0 && projectLineWrapWidth < 420 ? -30 : 0}
+                      textAnchor={projectLineWrapWidth > 0 && projectLineWrapWidth < 420 ? 'end' : 'middle'}
+                      height={projectLineWrapWidth > 0 && projectLineWrapWidth < 420 ? 50 : 30}
+                      minTickGap={10}
+                      tick={{ fontSize: projectLineWrapWidth > 0 && projectLineWrapWidth < 420 ? 10 : 12 }}
+                    />
                     <YAxis />
                     <Tooltip formatter={(v: any) => currency.format(Number(v) || 0)} />
                     <Legend />
@@ -1113,10 +1182,28 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
 
             <div className="bg-white p-4 rounded-xl shadow border border-gray-200">
               <div className="font-bold text-gray-700 mb-2">¿En qué se gasta? (proyecto)</div>
-              <div className="h-64">
+              <div className="h-64" ref={projectPieWrapRef}>
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
-                    <Pie data={selectedProjectMetrics?.expensePie ?? [{ name: 'Sin gastos', value: 1 }]} dataKey="value" nameKey="name" outerRadius={90} label>
+                    <Pie
+                      data={selectedProjectMetrics?.expensePie ?? [{ name: 'Sin gastos', value: 1 }]}
+                      dataKey="value"
+                      nameKey="name"
+                      outerRadius={90}
+                      labelLine={false}
+                      label={(() => {
+                        const data = selectedProjectMetrics?.expensePie ?? [{ name: 'Sin gastos', value: 1 }];
+                        const sliceCount = data.length;
+                        const tight = projectPieWrapWidth > 0 && projectPieWrapWidth < 420;
+                        if (tight || sliceCount > 6) return false;
+                        return ({ name, percent }: any) => {
+                          const p = Number(percent) || 0;
+                          if (p < 0.08) return '';
+                          const shortName = String(name || '').length > 10 ? `${String(name || '').slice(0, 10)}…` : String(name || '');
+                          return `${shortName} ${Math.round(p * 100)}%`;
+                        };
+                      })()}
+                    >
                       {(selectedProjectMetrics?.expensePie ?? [{ name: 'Sin gastos', value: 1 }]).map((_, index) => (
                         <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                       ))}
@@ -1151,21 +1238,56 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
 
           <div className="p-4 border-b border-gray-200">
             <div className="font-bold text-gray-700 mb-2">Planificado vs Ejecutado (cantidades, top renglones)</div>
-            <div className="h-72">
+            <div className="h-72" ref={topBarsWrapRef}>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart
-                  data={progressLines
-                    .slice()
-                    .sort((a, b) => (Number(b.directCost) || 0) - (Number(a.directCost) || 0))
-                    .slice(0, 12)
-                    .map((l) => ({
-                      name: l.name.length > 18 ? `${l.name.slice(0, 18)}…` : l.name,
+                  data={(() => {
+                    const rows = progressLines
+                      .slice()
+                      .sort((a, b) => (Number(b.directCost) || 0) - (Number(a.directCost) || 0))
+                      .slice(0, 12);
+
+                    const barCount = rows.length;
+                    const maxChars = (() => {
+                      if (topBarsWrapWidth > 0 && topBarsWrapWidth < 420) return 10;
+                      if (topBarsWrapWidth > 0 && topBarsWrapWidth < 640) return 14;
+                      if (barCount >= 10) return 14;
+                      return 18;
+                    })();
+
+                    return rows.map((l) => ({
+                      name: l.name.length > maxChars ? `${l.name.slice(0, maxChars)}…` : l.name,
                       plan: Math.round(Number(l.plannedQty) || 0),
                       ejec: Math.round(Number(l.completedQty) || 0),
-                    }))}
+                    }));
+                  })()}
                 >
                   <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="name" interval={0} angle={-15} textAnchor="end" height={60} />
+                  <XAxis
+                    dataKey="name"
+                    interval={(() => {
+                      const count = Math.min(12, progressLines.length);
+                      if (topBarsWrapWidth <= 0 || count <= 4) return 0;
+                      const maxTicks = Math.max(2, Math.floor(topBarsWrapWidth / 90));
+                      const skip = Math.max(0, Math.ceil(count / maxTicks) - 1);
+                      return skip;
+                    })()}
+                    angle={(() => {
+                      const count = Math.min(12, progressLines.length);
+                      if (topBarsWrapWidth > 0 && topBarsWrapWidth < 420) return -45;
+                      if (topBarsWrapWidth > 0 && topBarsWrapWidth < 640) return -35;
+                      if (count >= 9) return -35;
+                      return -15;
+                    })()}
+                    tick={{ fontSize: (topBarsWrapWidth > 0 && topBarsWrapWidth < 420) ? 10 : 12 }}
+                    minTickGap={6}
+                    textAnchor="end"
+                    height={(() => {
+                      if (topBarsWrapWidth > 0 && topBarsWrapWidth < 420) return 90;
+                      if (topBarsWrapWidth > 0 && topBarsWrapWidth < 640) return 80;
+                      return 60;
+                    })()}
+                  />
                   <YAxis />
                   <Tooltip />
                   <Legend />
