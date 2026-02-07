@@ -61,9 +61,19 @@ import ContractIntake from './components/ContractIntake';
 import WorkerAttendance from './components/WorkerAttendance';
 
 const App: React.FC = () => {
-  const appIconUrl = `${import.meta.env.BASE_URL}icon.svg`;
+  const appIconUrl = `${import.meta.env.BASE_URL}icon-192.png`;
   const isContractIntakeMode = typeof window !== 'undefined' && String(window.location.hash || '').startsWith('#contract-intake=');
-  const isWorkerAttendanceMode = typeof window !== 'undefined' && String(window.location.hash || '').startsWith('#asistencia=');
+  const isWorkerAttendanceMode = typeof window !== 'undefined' && (
+    String(window.location.hash || '').startsWith('#asistencia=') ||
+    (() => {
+      try {
+        const cached = localStorage.getItem('wm_worker_attendance_token_last');
+        return !!(cached && String(cached).trim());
+      } catch {
+        return false;
+      }
+    })()
+  );
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentView, setCurrentView] = useState<ViewState>('WELCOME');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -1120,6 +1130,7 @@ const App: React.FC = () => {
               <RRHH
                 projects={projects}
                 syncVersion={cloudSyncVersion}
+                isAdmin={!useCloud || canApproveRequisitions}
                 onListEmployees={handleListEmployees}
                 onCreateEmployee={handleCreateEmployee}
                 onListContracts={handleListEmployeeContracts}

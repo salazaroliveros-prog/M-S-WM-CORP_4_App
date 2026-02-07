@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { MapPin, Fingerprint, LogIn, LogOut, RefreshCw, ShieldCheck, UserPlus } from 'lucide-react';
-import { MapContainer, Marker, Popup, TileLayer } from 'react-leaflet';
+import { Fingerprint, LogIn, LogOut, RefreshCw, ShieldCheck, UserPlus } from 'lucide-react';
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
 import { getAttendanceTokenInfo, submitAttendanceWithToken, webauthnInvoke } from '../lib/db';
 
@@ -21,13 +20,36 @@ type GeoState = {
 };
 
 const WorkerAttendance: React.FC = () => {
-  const token = useMemo(() => {
+  const parseTokenFromHash = () => {
     const raw = window.location.hash || '';
     const m = raw.match(/#asistencia=([^&]+)/);
     return m?.[1] ? decodeURIComponent(m[1]) : '';
+  };
+
+  const [token, setToken] = useState<string>(() => {
+    const fromHash = parseTokenFromHash();
+    if (fromHash) return fromHash;
+    try {
+      const cached = localStorage.getItem('wm_worker_attendance_token_last');
+      return cached ? String(cached) : '';
+    } catch {
+      return '';
+    }
+  });
+
+  useEffect(() => {
+    const fromHash = parseTokenFromHash();
+    if (!fromHash) return;
+    setToken(fromHash);
+    try {
+      localStorage.setItem('wm_worker_attendance_token_last', fromHash);
+    } catch {
+      // ignore
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const [workDate, setWorkDate] = useState<string>(todayISO());
+  const [workDate] = useState<string>(todayISO());
   const [geo, setGeo] = useState<GeoState>({ status: 'idle' });
   const isWebAuthnUsable = useMemo(() => {
     if (typeof window === 'undefined') return false;
@@ -91,6 +113,11 @@ const WorkerAttendance: React.FC = () => {
       setBiometricMode('code');
     }
   }, [biometricMode, isWebAuthnUsable]);
+
+  useEffect(() => {
+    // Keep worker UX simple: prefer phone biometrics when available, otherwise fall back to code.
+    setBiometricMode(isWebAuthnUsable ? 'phone' : 'code');
+  }, [isWebAuthnUsable]);
 
   useEffect(() => {
     // Reduce friction: prompt for GPS as soon as the worker opens the app.
@@ -242,7 +269,12 @@ const WorkerAttendance: React.FC = () => {
     );
   }
 
-  const center: [number, number] | null = geo.status === 'ready' && geo.lat !== undefined && geo.lng !== undefined ? [geo.lat, geo.lng] : null;
+  const handleRefresh = async () => {
+    await Promise.all([
+      (async () => requestLocation())(),
+      (async () => refreshWebauthnStatus())(),
+    ]);
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
@@ -256,12 +288,12 @@ const WorkerAttendance: React.FC = () => {
             </div>
             <button
               type="button"
-              className="px-3 py-2 rounded border bg-white hover:bg-gray-50 flex items-center gap-2 text-sm"
-              onClick={requestLocation}
-              disabled={geo.status === 'loading'}
-              title="Actualizar ubicación"
+              className="px-3 py-2 rounded border bg-white hover:bg-gray-50 flex items-center gap-2 text-sm disabled:opacity-50"
+              onClick={handleRefresh}
+              disabled={geo.status === 'loading' || webauthnBusy}
+              title="Actualizar asistencia"
             >
-              <RefreshCw size={16} /> GPS
+              <RefreshCw size={16} /> Asistencia
             </button>
           </div>
 
@@ -274,24 +306,8 @@ const WorkerAttendance: React.FC = () => {
             </div>
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
-            <div>
-              <label className="block text-xs text-gray-600 mb-1" htmlFor="wa-date">Fecha *</label>
-              <input id="wa-date" type="date" className="w-full p-2 border rounded" value={workDate} onChange={e => setWorkDate(e.target.value)} />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-600 mb-1" htmlFor="wa-bio-mode">Biometría *</label>
-              <select
-                id="wa-bio-mode"
-                className="w-full p-2 border rounded"
-                value={biometricMode}
-                onChange={(e) => setBiometricMode(e.target.value as any)}
-                title="Método biométrico"
-              >
-                <option value="phone">Biometría del teléfono (huella/FaceID)</option>
-                <option value="code">Código de lector (manual)</option>
-              </select>
-            </div>
+          <div className="mt-4 text-xs text-gray-600">
+            Fecha: <span className="font-semibold">{workDate}</span>
           </div>
 
           {!isWebAuthnUsable && (
@@ -356,33 +372,12 @@ const WorkerAttendance: React.FC = () => {
           )}
 
           <div className="mt-4 p-3 rounded border bg-gray-50 text-sm">
-            <div className="flex items-center gap-2 font-semibold text-navy-900">
-              <MapPin size={16} className="text-mustard-500" /> Ubicación
-            </div>
-            {geo.status === 'idle' && <div className="text-gray-600">Presiona “GPS” para obtener tu ubicación.</div>}
+            <div className="font-semibold text-navy-900">GPS</div>
+            {geo.status === 'idle' && <div className="text-gray-600">Solicitando ubicación…</div>}
             {geo.status === 'loading' && <div className="text-gray-600">Obteniendo ubicación…</div>}
             {geo.status === 'error' && <div className="text-red-600">{geo.error}</div>}
-            {geo.status === 'ready' && (
-              <div className="text-gray-700">
-                <div>Lat: {geo.lat?.toFixed(6)} • Lng: {geo.lng?.toFixed(6)}</div>
-                <div>Precisión aprox: {geo.accuracyM ? `${Math.round(geo.accuracyM)} m` : 'N/A'}</div>
-              </div>
-            )}
+            {geo.status === 'ready' && <div className="text-gray-700">Ubicación lista{geo.accuracyM ? ` (±${Math.round(geo.accuracyM)}m)` : ''}.</div>}
           </div>
-
-          {center && (
-            <div className="mt-4 rounded overflow-hidden border">
-              <MapContainer center={center} zoom={18} style={{ height: 260, width: '100%' }}>
-                <TileLayer
-                  attribution='&copy; OpenStreetMap contributors'
-                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                />
-                <Marker position={center}>
-                  <Popup>Tu ubicación actual</Popup>
-                </Marker>
-              </MapContainer>
-            </div>
-          )}
 
           <div className="flex flex-col sm:flex-row gap-2 mt-4">
             <button

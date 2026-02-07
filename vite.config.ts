@@ -20,7 +20,7 @@ export default defineConfig(({ mode }) => {
         react(),
         VitePWA({
           registerType: 'autoUpdate',
-          includeAssets: ['icon.svg'],
+          includeAssets: ['icon-192.png', 'icon-512.png', 'apple-touch-icon.png', 'favicon-32.png'],
           manifest: {
             name: 'M&S Construcción',
             short_name: 'M&S',
@@ -32,9 +32,15 @@ export default defineConfig(({ mode }) => {
             theme_color: '#0A192F',
             icons: [
               {
-                src: 'icon.svg',
-                sizes: 'any',
-                type: 'image/svg+xml',
+                src: 'icon-192.png',
+                sizes: '192x192',
+                type: 'image/png',
+                purpose: 'any maskable',
+              },
+              {
+                src: 'icon-512.png',
+                sizes: '512x512',
+                type: 'image/png',
                 purpose: 'any maskable',
               },
             ],

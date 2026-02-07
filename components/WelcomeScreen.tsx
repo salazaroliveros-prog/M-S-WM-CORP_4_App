@@ -6,7 +6,7 @@ interface Props {
 }
 
 const WelcomeScreen: React.FC<Props> = ({ onLogin }) => {
-  const appIconUrl = `${import.meta.env.BASE_URL}icon.svg`;
+  const appIconUrl = `${import.meta.env.BASE_URL}icon-192.png`;
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
 

@@ -9,6 +9,7 @@ import autoTable from 'jspdf-autotable';
 interface Props {
   projects: Project[];
   syncVersion?: number;
+  isAdmin?: boolean;
   onListEmployees?: () => Promise<any[] | null>;
   onCreateEmployee?: (input: { name: string; dpi?: string; phone?: string; position: string; dailyRate: number; projectId?: string | null }) => Promise<any>;
   onListContracts?: () => Promise<any[] | null>;
@@ -111,6 +112,7 @@ const safeNumber = (v: any, fallback = 0) => {
 const RRHH: React.FC<Props> = ({
   projects,
   syncVersion,
+  isAdmin,
   onListEmployees,
   onCreateEmployee,
   onListContracts,
@@ -1321,42 +1323,44 @@ const RRHH: React.FC<Props> = ({
              </div>
           </div>
 
-          {attendanceCenter ? (
-            <div className="rounded overflow-hidden border mb-6">
-              <MapContainer center={attendanceCenter} zoom={16} style={{ height: 320, width: '100%' }}>
-                <TileLayer attribution='&copy; OpenStreetMap contributors' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                {attendanceRows
-                  .filter((r: any) => {
-                    if (!r) return false;
-                    const lat = Number(r.location_lat);
-                    const lng = Number(r.location_lng);
-                    return Number.isFinite(lat) && Number.isFinite(lng);
-                  })
-                  .map((r: any) => (
-                    <Marker key={String(r.id)} position={[Number(r.location_lat), Number(r.location_lng)]}>
-                      <Popup>
-                        <div className="text-sm">
-                          <div className="font-bold">{String(r.employee_name ?? '')}</div>
-                          <div>{String(r.project_name ?? '—')}</div>
-                          <div className="text-xs text-gray-600">
-                            {r.check_in ? `Entrada: ${new Date(r.check_in).toLocaleTimeString()}` : ''}
-                            {r.check_out ? ` • Salida: ${new Date(r.check_out).toLocaleTimeString()}` : ''}
+          {isAdmin && (
+            attendanceCenter ? (
+              <div className="rounded overflow-hidden border mb-6">
+                <MapContainer center={attendanceCenter} zoom={16} style={{ height: 320, width: '100%' }}>
+                  <TileLayer attribution='&copy; OpenStreetMap contributors' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                  {attendanceRows
+                    .filter((r: any) => {
+                      if (!r) return false;
+                      const lat = Number(r.location_lat);
+                      const lng = Number(r.location_lng);
+                      return Number.isFinite(lat) && Number.isFinite(lng);
+                    })
+                    .map((r: any) => (
+                      <Marker key={String(r.id)} position={[Number(r.location_lat), Number(r.location_lng)]}>
+                        <Popup>
+                          <div className="text-sm">
+                            <div className="font-bold">{String(r.employee_name ?? '')}</div>
+                            <div>{String(r.project_name ?? '—')}</div>
+                            <div className="text-xs text-gray-600">
+                              {r.check_in ? `Entrada: ${new Date(r.check_in).toLocaleTimeString()}` : ''}
+                              {r.check_out ? ` • Salida: ${new Date(r.check_out).toLocaleTimeString()}` : ''}
+                            </div>
+                            <div className="text-xs text-gray-500">Precisión: {r.accuracy_m ? `${Math.round(Number(r.accuracy_m))} m` : 'N/A'}</div>
                           </div>
-                          <div className="text-xs text-gray-500">Precisión: {r.accuracy_m ? `${Math.round(Number(r.accuracy_m))} m` : 'N/A'}</div>
-                        </div>
-                      </Popup>
-                    </Marker>
-                  ))}
-              </MapContainer>
-            </div>
-          ) : (
-            <div className="bg-gray-50 w-full rounded-lg flex items-center justify-center border border-dashed border-gray-300 mb-6 p-8">
-              <p className="text-gray-500 font-medium flex flex-col items-center">
-                <MapPin size={28} className="mb-2 text-red-500" />
-                <span>Sin ubicaciones registradas para esta fecha.</span>
-                <span className="text-xs">Genera el link al trabajador y marca asistencia.</span>
-              </p>
-            </div>
+                        </Popup>
+                      </Marker>
+                    ))}
+                </MapContainer>
+              </div>
+            ) : (
+              <div className="bg-gray-50 w-full rounded-lg flex items-center justify-center border border-dashed border-gray-300 mb-6 p-8">
+                <p className="text-gray-500 font-medium flex flex-col items-center">
+                  <MapPin size={28} className="mb-2 text-red-500" />
+                  <span>Sin ubicaciones registradas para esta fecha.</span>
+                  <span className="text-xs">Genera el link al trabajador y marca asistencia.</span>
+                </p>
+              </div>
+            )
           )}
 
           <div className="mb-6">
