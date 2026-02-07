@@ -20,7 +20,7 @@ export default defineConfig(({ mode }) => {
         react(),
         VitePWA({
           registerType: 'autoUpdate',
-          includeAssets: ['icon-192.png', 'icon-512.png', 'apple-touch-icon.png', 'favicon-32.png'],
+          includeAssets: ['icon-192.png', 'icon-512.png', 'apple-touch-icon.png', 'favicon-32.ico', 'header-logo.png', 'logo.png'],
           manifest: {
             name: 'M&S Construcción',
             short_name: 'M&S',

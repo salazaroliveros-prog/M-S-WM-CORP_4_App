@@ -6,7 +6,7 @@ interface Props {
 }
 
 const WelcomeScreen: React.FC<Props> = ({ onLogin }) => {
-  const appIconUrl = `${import.meta.env.BASE_URL}icon-192.png`;
+  const appIconUrl = `${import.meta.env.BASE_URL}header-logo.png`;
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
 
@@ -32,7 +32,7 @@ const WelcomeScreen: React.FC<Props> = ({ onLogin }) => {
           <img
             src={appIconUrl}
             alt="M&S"
-            className="w-12 h-12 md:w-14 md:h-14 object-contain block"
+            className="h-12 w-auto md:h-14 object-contain block max-w-full"
           />
         </div>
         <h1 className="text-5xl md:text-6xl font-extrabold text-mustard-500 tracking-tighter mb-2 drop-shadow-lg">

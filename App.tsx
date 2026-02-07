@@ -61,7 +61,7 @@ import ContractIntake from './components/ContractIntake';
 import WorkerAttendance from './components/WorkerAttendance';
 
 const App: React.FC = () => {
-  const appIconUrl = `${import.meta.env.BASE_URL}icon-192.png`;
+  const appIconUrl = `${import.meta.env.BASE_URL}header-logo.png`;
   const isContractIntakeMode = typeof window !== 'undefined' && String(window.location.hash || '').startsWith('#contract-intake=');
   const isWorkerAttendanceMode = typeof window !== 'undefined' && (
     String(window.location.hash || '').startsWith('#asistencia=') ||
@@ -934,7 +934,7 @@ const App: React.FC = () => {
       <aside className="hidden md:flex flex-col w-64 bg-navy-900 text-white shadow-xl">
         <div className="p-6 border-b border-navy-800">
           <div className="flex items-center gap-3">
-            <img src={appIconUrl} alt="M&S" className="w-8 h-8 object-contain block" />
+            <img src={appIconUrl} alt="M&S" className="h-8 w-auto object-contain block max-w-full" />
             <h1 className="text-xl font-bold text-mustard-500">M&S Construcción</h1>
           </div>
           <p className="text-xs text-gray-400 mt-1 tracking-widest">EDIFICANDO EL FUTURO</p>
@@ -962,7 +962,7 @@ const App: React.FC = () => {
       <div className="md:hidden fixed top-0 w-full bg-navy-900 text-white z-50 flex items-center justify-between p-4 shadow-md">
         <div>
           <div className="flex items-center gap-2">
-            <img src={appIconUrl} alt="M&S" className="w-6 h-6 object-contain block" />
+            <img src={appIconUrl} alt="M&S" className="h-6 w-auto object-contain block max-w-full" />
             <h1 className="font-bold text-mustard-500">M&S</h1>
           </div>
         </div>
