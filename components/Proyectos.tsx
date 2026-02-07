@@ -10,6 +10,7 @@ interface Props {
   onViewChange: (view: ViewState) => void;
   onSelectProject: (id: string) => void;
   onQuoteProject: (project: Project) => void;
+  onSyncCloud?: () => Promise<void>;
 }
 
 interface ConfirmDialogState {
@@ -20,7 +21,7 @@ interface ConfirmDialogState {
   isDestructive?: boolean;
 }
 
-const Proyectos: React.FC<Props> = ({ projects, onCreateProject, onUpdateProject, onDeleteProject, onViewChange, onSelectProject, onQuoteProject }) => {
+const Proyectos: React.FC<Props> = ({ projects, onCreateProject, onUpdateProject, onDeleteProject, onViewChange, onSelectProject, onQuoteProject, onSyncCloud }) => {
   const [showForm, setShowForm] = useState(false);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [viewProject, setViewProject] = useState<Project | null>(null);
@@ -31,6 +32,7 @@ const Proyectos: React.FC<Props> = ({ projects, onCreateProject, onUpdateProject
   const [validationError, setValidationError] = useState<string | null>(null);
   const [createdProject, setCreatedProject] = useState<Project | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isCloudSyncing, setIsCloudSyncing] = useState(false);
 
   // Filter and Sort State
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'standby' | 'completed'>('all');
@@ -285,13 +287,21 @@ const Proyectos: React.FC<Props> = ({ projects, onCreateProject, onUpdateProject
   };
 
   const syncProjects = () => {
-    // Simulation of Schema Generation for cloud sync
-    const schema = {
-      tableName: 'projects',
-      columns: ['id', 'name', 'client_name', 'location', 'lot', 'block', 'coordinates', 'area_land', 'area_build', 'status', 'start_date', 'typology', 'project_manager']
-    };
-    console.log("Syncing Schema:", schema);
-    alert(`Sincronización simulada. Esquema generado en consola.`);
+    if (!onSyncCloud) {
+      alert('Supabase no está disponible en este entorno (modo local).');
+      return;
+    }
+    setIsCloudSyncing(true);
+    (async () => {
+      try {
+        await onSyncCloud();
+        alert('Sincronización con la nube completada.');
+      } catch (e: any) {
+        alert(e?.message || 'No se pudo sincronizar con la nube.');
+      } finally {
+        setIsCloudSyncing(false);
+      }
+    })();
   };
 
   const handleFetchFromAPI = () => {
@@ -508,7 +518,7 @@ const Proyectos: React.FC<Props> = ({ projects, onCreateProject, onUpdateProject
             <span>{isLoading ? 'Cargando...' : 'Obtener Datos (API)'}</span>
           </button>
           <button onClick={syncProjects} className="bg-blue-100 text-blue-800 px-4 py-2 rounded-full border border-blue-200 text-sm font-medium hover:bg-blue-200 transition-colors flex-grow md:flex-grow-0 text-center">
-            Sincronizar Nube
+            {isCloudSyncing ? 'Sincronizando…' : 'Sincronizar Nube'}
           </button>
           <button onClick={() => { setShowForm(!showForm); setCreatedProject(null); setEditingProjectId(null); }} className="bg-mustard-500 text-navy-900 px-4 py-2 rounded-lg font-bold flex items-center justify-center space-x-2 hover:bg-mustard-600 flex-grow md:flex-grow-0">
             <Plus size={18} />

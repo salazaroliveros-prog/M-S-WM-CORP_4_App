@@ -724,6 +724,11 @@ const App: React.FC = () => {
     }
   };
 
+  const handleSyncCloud = async () => {
+    if (!isSupabaseConfigured) throw new Error('Supabase no configurado.');
+    await initCloud();
+  };
+
   const handleLogin = () => {
     setIsAuthenticated(true);
     setCurrentView('INICIO'); // Default after login
@@ -930,6 +935,7 @@ const App: React.FC = () => {
                 onViewChange={setCurrentView}
                 onSelectProject={setPreselectedProjectId}
                 onQuoteProject={handleQuoteProject}
+                onSyncCloud={isSupabaseConfigured ? handleSyncCloud : undefined}
               />
             )}
             {currentView === 'PRESUPUESTOS' && (
