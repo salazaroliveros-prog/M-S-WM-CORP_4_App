@@ -11,6 +11,7 @@ interface Props {
   onSelectProject: (id: string) => void;
   onQuoteProject: (project: Project) => void;
   onSyncCloud?: () => Promise<void>;
+  onMigrateLocalToCloud?: () => Promise<{ projects: number; budgets: number; progress: number; transactions: number }>;
 }
 
 interface ConfirmDialogState {
@@ -21,7 +22,7 @@ interface ConfirmDialogState {
   isDestructive?: boolean;
 }
 
-const Proyectos: React.FC<Props> = ({ projects, onCreateProject, onUpdateProject, onDeleteProject, onViewChange, onSelectProject, onQuoteProject, onSyncCloud }) => {
+const Proyectos: React.FC<Props> = ({ projects, onCreateProject, onUpdateProject, onDeleteProject, onViewChange, onSelectProject, onQuoteProject, onSyncCloud, onMigrateLocalToCloud }) => {
   const [showForm, setShowForm] = useState(false);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [viewProject, setViewProject] = useState<Project | null>(null);
@@ -33,6 +34,7 @@ const Proyectos: React.FC<Props> = ({ projects, onCreateProject, onUpdateProject
   const [createdProject, setCreatedProject] = useState<Project | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isCloudSyncing, setIsCloudSyncing] = useState(false);
+  const [isCloudMigrating, setIsCloudMigrating] = useState(false);
 
   // Filter and Sort State
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'standby' | 'completed'>('all');
@@ -304,6 +306,24 @@ const Proyectos: React.FC<Props> = ({ projects, onCreateProject, onUpdateProject
     })();
   };
 
+  const migrateLocalToCloud = () => {
+    if (!onMigrateLocalToCloud) {
+      alert('Migración no disponible (modo local).');
+      return;
+    }
+    setIsCloudMigrating(true);
+    (async () => {
+      try {
+        const res = await onMigrateLocalToCloud();
+        alert(`Migración completada. Proyectos: ${res.projects}, Presupuestos: ${res.budgets}, Avances: ${res.progress}, Transacciones: ${res.transactions}.`);
+      } catch (e: any) {
+        alert(e?.message || 'No se pudo migrar a la nube.');
+      } finally {
+        setIsCloudMigrating(false);
+      }
+    })();
+  };
+
   const handleFetchFromAPI = () => {
     setIsLoading(true);
     // Simulate API delay
@@ -519,6 +539,14 @@ const Proyectos: React.FC<Props> = ({ projects, onCreateProject, onUpdateProject
           </button>
           <button onClick={syncProjects} className="bg-blue-100 text-blue-800 px-4 py-2 rounded-full border border-blue-200 text-sm font-medium hover:bg-blue-200 transition-colors flex-grow md:flex-grow-0 text-center">
             {isCloudSyncing ? 'Sincronizando…' : 'Sincronizar Nube'}
+          </button>
+          <button
+            onClick={migrateLocalToCloud}
+            disabled={!onMigrateLocalToCloud || isCloudMigrating}
+            className="bg-blue-100 text-blue-800 px-4 py-2 rounded-full border border-blue-200 text-sm font-medium hover:bg-blue-200 transition-colors flex-grow md:flex-grow-0 text-center disabled:opacity-50"
+            title="Sube datos guardados localmente hacia Supabase (crea copias nuevas en la nube)"
+          >
+            {isCloudMigrating ? 'Subiendo…' : 'Subir Local → Nube'}
           </button>
           <button onClick={() => { setShowForm(!showForm); setCreatedProject(null); setEditingProjectId(null); }} className="bg-mustard-500 text-navy-900 px-4 py-2 rounded-lg font-bold flex items-center justify-center space-x-2 hover:bg-mustard-600 flex-grow md:flex-grow-0">
             <Plus size={18} />

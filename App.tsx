@@ -44,6 +44,8 @@ import {
   deleteServiceQuote as dbDeleteServiceQuote,
 } from './lib/db';
 
+import type { BudgetLine, Transaction } from './types';
+
 // Components
 import WelcomeScreen from './components/WelcomeScreen';
 import Dashboard from './components/Dashboard';
@@ -100,6 +102,32 @@ const App: React.FC = () => {
     } catch {
       return null;
     }
+  };
+
+  const normalizeLocalTransaction = (input: any): Transaction | null => {
+    if (!input) return null;
+    const projectId = String(input.projectId ?? input.project_id ?? '').trim();
+    const type = String(input.type ?? '').trim() as any;
+    const date = String(input.date ?? input.occurred_at ?? '').trim();
+    const cost = Number(input.cost ?? 0);
+    if (!projectId) return null;
+    if (type !== 'INGRESO' && type !== 'GASTO') return null;
+    if (!date) return null;
+    if (!Number.isFinite(cost)) return null;
+
+    return {
+      id: String(input.id ?? crypto.randomUUID()),
+      projectId,
+      type,
+      description: String(input.description ?? ''),
+      amount: Number(input.amount ?? 0) || 0,
+      unit: String(input.unit ?? ''),
+      cost,
+      category: String(input.category ?? ''),
+      date,
+      provider: input.provider ? String(input.provider) : undefined,
+      rentEndDate: input.rentEndDate ? String(input.rentEndDate) : (input.rent_end_date ? String(input.rent_end_date) : undefined),
+    };
   };
 
   // Global State (Mocking a database)
@@ -697,8 +725,9 @@ const App: React.FC = () => {
     };
   };
 
-  const initCloud = async () => {
-    if (!isSupabaseConfigured) return;
+  const initCloudStrict = async (): Promise<string> => {
+    if (!isSupabaseConfigured) throw new Error('Supabase no configurado.');
+
     setIsCloudInitInFlight(true);
     try {
       setCloudError(null);
@@ -713,20 +742,117 @@ const App: React.FC = () => {
         setCanApproveRequisitions(false);
       }
       await refreshProjects(resolvedOrgId);
+      return resolvedOrgId;
     } catch (e: any) {
       console.error(e);
       setCloudError(e?.message || 'Error inicializando Supabase');
       setOrgId(null);
       setCanApproveRequisitions(false);
       setCloudMode('local');
+      throw e;
     } finally {
       setIsCloudInitInFlight(false);
     }
   };
 
+  const initCloud = async () => {
+    if (!isSupabaseConfigured) return;
+    try {
+      await initCloudStrict();
+    } catch {
+      // keep UX: error banner + fallback to local
+    }
+  };
+
   const handleSyncCloud = async () => {
-    if (!isSupabaseConfigured) throw new Error('Supabase no configurado.');
-    await initCloud();
+    await initCloudStrict();
+  };
+
+  const handleMigrateLocalToCloud = async (): Promise<{ projects: number; budgets: number; progress: number; transactions: number }> => {
+    const resolvedOrgId = await initCloudStrict();
+
+    const localScope = 'local';
+    const localProjects = safeJsonParse<Project[]>(localStorage.getItem(projectsCacheKey(localScope))) ?? [];
+    if (!Array.isArray(localProjects) || localProjects.length === 0) {
+      throw new Error('No hay proyectos locales para migrar.');
+    }
+
+    const localToCloudProjectId = new Map<string, string>();
+    let createdProjects = 0;
+    let migratedBudgets = 0;
+    let migratedProgress = 0;
+    let migratedTx = 0;
+
+    for (const p of localProjects) {
+      const created = await dbCreateProject(resolvedOrgId, {
+        name: p.name,
+        clientName: p.clientName,
+        location: p.location,
+        lot: p.lot,
+        block: p.block,
+        coordinates: p.coordinates,
+        areaLand: p.areaLand,
+        areaBuild: p.areaBuild,
+        needs: p.needs,
+        status: p.status,
+        startDate: p.startDate,
+        typology: p.typology,
+        projectManager: p.projectManager,
+      });
+      createdProjects++;
+      localToCloudProjectId.set(p.id, created.id);
+
+      // Budget (offline-first cache)
+      const cachedBudget = safeJsonParse<any>(localStorage.getItem(budgetCacheKey(localScope, p.id)));
+      if (cachedBudget && Array.isArray(cachedBudget.lines)) {
+        const typology = String(cachedBudget.typology ?? p.typology ?? '').trim() || String(p.typology || 'RESIDENCIAL');
+        const indirectPct = String(cachedBudget.indirectPct ?? '35');
+        const lines = (cachedBudget.lines as BudgetLine[]).map((l: any) => ({
+          ...l,
+          projectId: created.id,
+        }));
+        await saveBudgetForProject(resolvedOrgId, created.id, typology, indirectPct, lines);
+        migratedBudgets++;
+      }
+
+      // Progress (offline-first cache)
+      const cachedProgress =
+        safeJsonParse<any>(localStorage.getItem(progressCacheKey(localScope, p.id))) ??
+        safeJsonParse<any>(localStorage.getItem(progressCompatKey(p.id)));
+      if (cachedProgress && Array.isArray(cachedProgress.lines)) {
+        await saveProgressForProject(resolvedOrgId, created.id, {
+          ...cachedProgress,
+          projectId: created.id,
+        });
+        migratedProgress++;
+      }
+    }
+
+    // Transactions (offline caches)
+    const txLocal = safeJsonParse<any[]>(localStorage.getItem(txCacheKey(localScope))) ?? [];
+    const txLegacy = safeJsonParse<any[]>(localStorage.getItem('transactions')) ?? [];
+    const allTx = [...(Array.isArray(txLocal) ? txLocal : []), ...(Array.isArray(txLegacy) ? txLegacy : [])];
+    const seen = new Set<string>();
+
+    for (const raw of allTx) {
+      const tx = normalizeLocalTransaction(raw);
+      if (!tx) continue;
+      const mappedProjectId = localToCloudProjectId.get(tx.projectId);
+      if (!mappedProjectId) continue;
+
+      const signature = `${tx.type}|${tx.date}|${tx.cost}|${tx.amount}|${tx.category}|${tx.description}|${tx.unit}|${mappedProjectId}`;
+      if (seen.has(signature)) continue;
+      seen.add(signature);
+
+      await dbCreateTransaction(resolvedOrgId, { ...tx, projectId: mappedProjectId });
+      migratedTx++;
+    }
+
+    // Refresh UI from cloud + bump modules
+    await refreshProjects(resolvedOrgId);
+    setCloudSyncVersion((v) => v + 1);
+
+    return { projects: createdProjects, budgets: migratedBudgets, progress: migratedProgress, transactions: migratedTx };
   };
 
   const handleLogin = () => {
@@ -936,6 +1062,7 @@ const App: React.FC = () => {
                 onSelectProject={setPreselectedProjectId}
                 onQuoteProject={handleQuoteProject}
                 onSyncCloud={isSupabaseConfigured ? handleSyncCloud : undefined}
+                onMigrateLocalToCloud={isSupabaseConfigured ? handleMigrateLocalToCloud : undefined}
               />
             )}
             {currentView === 'PRESUPUESTOS' && (
