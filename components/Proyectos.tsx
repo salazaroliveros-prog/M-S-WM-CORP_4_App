@@ -11,7 +11,13 @@ interface Props {
   onSelectProject: (id: string) => void;
   onQuoteProject: (project: Project) => void;
   onSyncCloud?: () => Promise<void>;
-  onMigrateLocalToCloud?: () => Promise<{ projects: number; budgets: number; progress: number; transactions: number }>;
+  onMigrateLocalToCloud?: () => Promise<{
+    projects: number;
+    budgets: number;
+    progress: number;
+    transactions: number;
+    projectMap: Array<{ localId: string; localName: string; cloudId: string; cloudName: string }>;
+  }>;
 }
 
 interface ConfirmDialogState {
@@ -315,7 +321,36 @@ const Proyectos: React.FC<Props> = ({ projects, onCreateProject, onUpdateProject
     (async () => {
       try {
         const res = await onMigrateLocalToCloud();
-        alert(`Migración completada. Proyectos: ${res.projects}, Presupuestos: ${res.budgets}, Avances: ${res.progress}, Transacciones: ${res.transactions}.`);
+        try {
+          if (Array.isArray(res.projectMap) && res.projectMap.length > 0) {
+            console.table(res.projectMap);
+          }
+        } catch {
+          // ignore
+        }
+
+        const lines: string[] = [];
+        lines.push('Migración completada.');
+        lines.push(`Proyectos: ${res.projects}`);
+        lines.push(`Presupuestos: ${res.budgets}`);
+        lines.push(`Avances: ${res.progress}`);
+        lines.push(`Transacciones: ${res.transactions}`);
+
+        const map = Array.isArray(res.projectMap) ? res.projectMap : [];
+        if (map.length > 0) {
+          lines.push('');
+          lines.push('Proyectos (Local → Nube):');
+          for (const m of map.slice(0, 10)) {
+            lines.push(`- ${m.localName} → ${m.cloudName}`);
+          }
+          if (map.length > 10) {
+            lines.push(`(y ${map.length - 10} más… ver consola)`);
+          } else {
+            lines.push('(ver consola para IDs)');
+          }
+        }
+
+        alert(lines.join('\n'));
       } catch (e: any) {
         alert(e?.message || 'No se pudo migrar a la nube.');
       } finally {

@@ -768,7 +768,13 @@ const App: React.FC = () => {
     await initCloudStrict();
   };
 
-  const handleMigrateLocalToCloud = async (): Promise<{ projects: number; budgets: number; progress: number; transactions: number }> => {
+  const handleMigrateLocalToCloud = async (): Promise<{
+    projects: number;
+    budgets: number;
+    progress: number;
+    transactions: number;
+    projectMap: Array<{ localId: string; localName: string; cloudId: string; cloudName: string }>;
+  }> => {
     const resolvedOrgId = await initCloudStrict();
 
     const localScope = 'local';
@@ -778,6 +784,7 @@ const App: React.FC = () => {
     }
 
     const localToCloudProjectId = new Map<string, string>();
+    const projectMap: Array<{ localId: string; localName: string; cloudId: string; cloudName: string }> = [];
     let createdProjects = 0;
     let migratedBudgets = 0;
     let migratedProgress = 0;
@@ -801,6 +808,7 @@ const App: React.FC = () => {
       });
       createdProjects++;
       localToCloudProjectId.set(p.id, created.id);
+      projectMap.push({ localId: p.id, localName: p.name, cloudId: created.id, cloudName: created.name });
 
       // Budget (offline-first cache)
       const cachedBudget = safeJsonParse<any>(localStorage.getItem(budgetCacheKey(localScope, p.id)));
@@ -852,7 +860,7 @@ const App: React.FC = () => {
     await refreshProjects(resolvedOrgId);
     setCloudSyncVersion((v) => v + 1);
 
-    return { projects: createdProjects, budgets: migratedBudgets, progress: migratedProgress, transactions: migratedTx };
+    return { projects: createdProjects, budgets: migratedBudgets, progress: migratedProgress, transactions: migratedTx, projectMap };
   };
 
   const handleLogin = () => {
