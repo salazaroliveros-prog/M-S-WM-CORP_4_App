@@ -29,7 +29,11 @@ const WelcomeScreen: React.FC<Props> = ({ onLogin }) => {
 
       <div className="z-20 text-center p-8 max-w-md w-full">
         <div className="flex items-center justify-center mb-4">
-          <img src={appIconUrl} alt="M&S" className="w-14 h-14" />
+          <img
+            src={appIconUrl}
+            alt="M&S"
+            className="w-12 h-12 md:w-14 md:h-14 object-contain block"
+          />
         </div>
         <h1 className="text-5xl md:text-6xl font-extrabold text-mustard-500 tracking-tighter mb-2 drop-shadow-lg">
           M&S
