@@ -1,10 +1,7 @@
--- Enable Supabase Realtime (WAL) for selected public tables.
+-- Ensure Supabase Realtime publication includes all core public tables.
 --
--- Run this in Supabase SQL Editor if you want realtime subscriptions to emit
--- `postgres_changes` events from supabase-js.
---
--- Note: Supabase manages the `supabase_realtime` publication. This script only
--- adds tables to that publication if they are missing.
+-- Supabase manages the `supabase_realtime` publication; this migration is idempotent
+-- and only adds tables that exist and are missing from the publication.
 
 begin;
 
@@ -24,35 +21,33 @@ declare
     'public.budget_lines',
     'public.budget_line_materials',
 
-    -- Seguimiento
-    'public.project_progress',
-    'public.project_progress_lines',
-    'public.project_phases',
-
     -- Compras
+    'public.suppliers',
     'public.requisitions',
     'public.requisition_items',
-    'public.suppliers',
 
     -- RRHH
     'public.employees',
     'public.employee_contracts',
     'public.org_pay_rates',
     'public.employee_rate_overrides',
-    'public.payroll_periods',
-    'public.payroll_entries',
 
     -- Cotizador / Intake
     'public.service_quotes',
+
+    -- Seguimiento
+    'public.project_progress',
+    'public.project_progress_lines',
 
     -- Asistencia
     'public.attendance',
     'public.employee_attendance_tokens',
 
-    -- Cotizador
+    -- Other tables used by the app (best-effort)
+    'public.project_phases',
+    'public.payroll_periods',
+    'public.payroll_entries',
     'public.quotes',
-
-    -- Catálogo APU + precios (si aplicaste 20260204_catalog_apu_prices.sql)
     'public.material_catalog_items',
     'public.material_price_quotes',
     'public.apu_templates'
@@ -81,8 +76,6 @@ begin
     ) then
       execute format('alter publication %I add table %s', pub_name, fqtn);
       raise notice 'Added % to publication %', fqtn, pub_name;
-    else
-      raise notice 'Already present: %', fqtn;
     end if;
   end loop;
 end $$;
