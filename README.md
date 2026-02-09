@@ -64,6 +64,42 @@ En PowerShell:
 
 `$env:SUPABASE_REQUIRE_REALTIME='true'; npm run test:supabase`
 
+## Validación de datos y Realtime (app)
+
+La app incluye un panel **Diagnóstico Supabase** que valida:
+
+- Que la aplicación **lee/escribe** en las tablas principales (con datos temporales con prefijo `SMOKE_TEST`).
+- Que **Realtime** entrega eventos y que hay **cobertura** (suscripción) para las tablas principales.
+- Que al final se hace **limpieza** (borrado) de los datos de prueba creados por el diagnóstico.
+
+### Monitor Realtime (cross-dispositivo)
+
+Para comprobar que los cambios se ven en vivo desde **otro dispositivo** (sin escribir datos desde el monitor):
+
+1) En el dispositivo B: abrir **Diagnóstico Supabase → Monitor Realtime** y presionar **Iniciar**.
+2) En el dispositivo A: crear/editar/borrar datos (por ejemplo en Proyectos/Compras/RRHH).
+3) En el dispositivo B: verás un feed de eventos `INSERT/UPDATE/DELETE` por tabla.
+
+Notas:
+
+- Ambos dispositivos deben estar en la **misma organización** (mismo `org_id`).
+- Realtime debe estar habilitado en Supabase por tabla (ver sección **Realtime** arriba).
+
+## Validación de datos reales (SQL)
+
+Para validar integridad de datos reales en una instalación donde usas **una sola organización**:
+
+- Ejecuta: [supabase/scripts/validate_real_data_single_org.sql](supabase/scripts/validate_real_data_single_org.sql)
+
+Incluye conteos por tabla, chequeos de integridad y un resumen compacto (SUMMARY) para detectar orfandades/inconsistencias.
+
+### Limpieza de datos de prueba (SQL)
+
+- Purga segura por org (patrones `SMOKE_TEST`/`VITEST`):
+   [supabase/scripts/purge_test_data_by_org.sql](supabase/scripts/purge_test_data_by_org.sql)
+- Wipe total (peligroso, TRUNCATE/CASCADE):
+   [supabase/scripts/purge_all_app_data_DANGEROUS.sql](supabase/scripts/purge_all_app_data_DANGEROUS.sql)
+
 ## Deploy a GitHub Pages
 
 Este repo está configurado para desplegarse automáticamente a GitHub Pages con GitHub Actions.
