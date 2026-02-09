@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle, XCircle, Loader2, Play, Trash2 } from 'lucide-react';
 import type { BudgetLine } from '../types';
 import { getSupabaseClient } from '../lib/supabaseClient';
@@ -54,6 +54,13 @@ const REALTIME_TABLES_TO_VERIFY = [
 
 type RealtimeTableName = (typeof REALTIME_TABLES_TO_VERIFY)[number];
 
+type MonitorEvent = {
+  ts: string;
+  table: RealtimeTableName;
+  event: string;
+  recordId?: string;
+};
+
 function sleep(ms: number) {
   return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 }
@@ -88,6 +95,11 @@ const SupabaseDiagnostics: React.FC<Props> = ({ orgId, enabled }) => {
   const [cleanupRunning, setCleanupRunning] = useState(false);
   const [cleanupMsg, setCleanupMsg] = useState<string | null>(null);
 
+  const [monitoring, setMonitoring] = useState(false);
+  const [monitorSubStatus, setMonitorSubStatus] = useState<string | null>(null);
+  const [monitorEvents, setMonitorEvents] = useState<MonitorEvent[]>([]);
+  const monitorChannelRef = useRef<ReturnType<ReturnType<typeof getSupabaseClient>['channel']> | null>(null);
+
   const summary = useMemo(() => {
     const ok = steps.filter(s => s.status === 'ok').length;
     const fail = steps.filter(s => s.status === 'fail').length;
@@ -102,6 +114,65 @@ const SupabaseDiagnostics: React.FC<Props> = ({ orgId, enabled }) => {
   const reset = () => {
     setSteps(prev => prev.map(s => ({ ...s, status: 'pending', detail: undefined })));
   };
+
+  const stopMonitor = () => {
+    const supabase = getSupabaseClient();
+    if (monitorChannelRef.current) {
+      supabase.removeChannel(monitorChannelRef.current as any);
+      monitorChannelRef.current = null;
+    }
+    setMonitoring(false);
+    setMonitorSubStatus(null);
+  };
+
+  const startMonitor = async () => {
+    if (!enabled || !orgId || monitoring) return;
+
+    const supabase = getSupabaseClient();
+    stopMonitor();
+    setMonitorEvents([]);
+    setMonitoring(true);
+
+    const stamp = nowStamp();
+    const channel = supabase.channel(`diag-monitor:${orgId}:${stamp}`);
+
+    const pushEvent = (table: RealtimeTableName, payload: any) => {
+      const event = String(payload?.eventType || payload?.event || 'UNKNOWN');
+      const recordIdRaw = payload?.new?.id ?? payload?.old?.id ?? payload?.new?.record_id ?? payload?.old?.record_id;
+      const recordId = recordIdRaw != null ? String(recordIdRaw) : undefined;
+
+      const e: MonitorEvent = {
+        ts: new Date().toISOString(),
+        table,
+        event,
+        recordId,
+      };
+
+      setMonitorEvents((prev) => [e, ...prev].slice(0, 60));
+    };
+
+    // Attach listeners for each relevant table.
+    for (const table of REALTIME_TABLES_TO_VERIFY) {
+      channel.on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table, filter: `org_id=eq.${orgId}` },
+        (payload: any) => pushEvent(table, payload)
+      );
+    }
+
+    monitorChannelRef.current = channel as any;
+    const status = await new Promise<string>((resolve) => {
+      channel.subscribe((s: any) => resolve(String(s || 'unknown')));
+    });
+    setMonitorSubStatus(status);
+  };
+
+  useEffect(() => {
+    return () => {
+      stopMonitor();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const cleanupSmokeTestProjects = async () => {
     if (!enabled || !orgId || cleanupRunning) return;
@@ -722,6 +793,103 @@ const SupabaseDiagnostics: React.FC<Props> = ({ orgId, enabled }) => {
 
         <div className="mt-4 text-xs text-gray-500">
           Nota: la prueba crea datos con prefijo <strong>SMOKE_TEST</strong> y luego intenta eliminarlos.
+        </div>
+      </div>
+
+      <div className="bg-white p-6 rounded-xl shadow-lg border border-gray-200">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <h3 className="text-lg font-bold text-navy-900">Monitor Realtime (cross-dispositivo)</h3>
+            <div className="text-sm text-gray-600 mt-1">
+              Escucha eventos en tiempo real (sin escribir datos). Úsalo para validar que cambios hechos desde otro dispositivo llegan aquí.
+            </div>
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              onClick={startMonitor}
+              disabled={!enabled || !orgId || monitoring}
+              className="px-4 py-2 bg-navy-900 text-white rounded font-bold hover:bg-navy-800 flex items-center gap-2 disabled:opacity-50"
+              title="Iniciar monitor"
+            >
+              <Play size={16} /> Iniciar
+            </button>
+            <button
+              onClick={stopMonitor}
+              disabled={!monitoring}
+              className="px-4 py-2 bg-white border rounded font-bold hover:bg-gray-50 flex items-center gap-2 disabled:opacity-50"
+              title="Detener monitor"
+            >
+              <Trash2 size={16} /> Detener
+            </button>
+            <button
+              onClick={() => setMonitorEvents([])}
+              disabled={!monitorEvents.length}
+              className="px-4 py-2 bg-white border rounded font-bold hover:bg-gray-50 flex items-center gap-2 disabled:opacity-50"
+              title="Limpiar eventos"
+            >
+              <Trash2 size={16} /> Limpiar
+            </button>
+          </div>
+        </div>
+
+        {enabled && orgId && (
+          <div className="mt-3 text-sm text-gray-700">
+            <span className="font-semibold">Estado:</span>{' '}
+            {monitoring ? (
+              <span className="text-green-700 font-bold">Escuchando</span>
+            ) : (
+              <span className="text-gray-500">Detenido</span>
+            )}
+            {monitorSubStatus && <span className="text-gray-500"> (subscribe={monitorSubStatus})</span>}
+          </div>
+        )}
+
+        {!enabled && (
+          <div className="mt-4 p-3 rounded border bg-amber-50 border-amber-200 text-amber-800 text-sm">
+            Configure <code>VITE_SUPABASE_URL</code> y <code>VITE_SUPABASE_ANON_KEY</code> para usar el monitor.
+          </div>
+        )}
+
+        {enabled && !orgId && (
+          <div className="mt-4 p-3 rounded border bg-blue-50 border-blue-200 text-blue-800 text-sm">
+            Inicie sesión y espere a que Supabase inicialice la organización.
+          </div>
+        )}
+
+        <div className="mt-4 border rounded overflow-hidden">
+          <div className="p-2 bg-gray-50 border-b text-xs text-gray-600 flex items-center justify-between">
+            <div>
+              Últimos eventos: <span className="font-semibold">{monitorEvents.length}</span>
+            </div>
+            <div className="text-gray-500">(máximo 60)</div>
+          </div>
+          <div className="max-h-[320px] overflow-auto">
+            {monitorEvents.length === 0 ? (
+              <div className="p-3 text-sm text-gray-500">Sin eventos todavía. Inicia el monitor y crea/edita algo desde otro dispositivo.</div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-white border-b">
+                  <tr className="text-left">
+                    <th className="p-2 text-xs text-gray-600">Hora (UTC)</th>
+                    <th className="p-2 text-xs text-gray-600">Tabla</th>
+                    <th className="p-2 text-xs text-gray-600">Evento</th>
+                    <th className="p-2 text-xs text-gray-600">Record</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {monitorEvents.map((e, idx) => (
+                    <tr key={`${e.ts}-${e.table}-${idx}`}>
+                      <td className="p-2 text-xs text-gray-500 whitespace-nowrap">{e.ts}</td>
+                      <td className="p-2 font-semibold text-navy-900">{e.table}</td>
+                      <td className="p-2">{e.event}</td>
+                      <td className="p-2 text-xs text-gray-600 break-all">{e.recordId ?? '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
         </div>
       </div>
     </div>
