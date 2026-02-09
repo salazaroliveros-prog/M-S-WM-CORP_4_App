@@ -140,6 +140,41 @@ const App: React.FC = () => {
     };
   };
 
+  const projectFromDbRow = (row: any, prev?: Project): Project | null => {
+    const id = row?.id;
+    if (!id) return null;
+
+    const pick = <T,>(value: T | undefined, fallback: T | undefined) => (value !== undefined ? value : fallback);
+
+    const startRaw = pick<string | null>(row?.start_date, undefined);
+    const startDate =
+      startRaw !== undefined
+        ? (startRaw ? new Date(startRaw).toISOString() : (prev?.startDate ?? new Date().toISOString()))
+        : (prev?.startDate ?? new Date().toISOString());
+
+    const areaLandRaw = pick<any>(row?.area_land, undefined);
+    const areaBuildRaw = pick<any>(row?.area_build, undefined);
+
+    return {
+      id: String(id),
+      name: pick<string>(row?.name, prev?.name) ?? '',
+      clientName: pick<string>(row?.client_name, prev?.clientName) ?? '',
+      location: pick<string>(row?.location, prev?.location) ?? '',
+      lot: row?.lot !== undefined ? (row.lot ?? undefined) : prev?.lot,
+      block: row?.block !== undefined ? (row.block ?? undefined) : prev?.block,
+      coordinates: row?.coordinates !== undefined ? (row.coordinates ?? undefined) : prev?.coordinates,
+      areaLand:
+        areaLandRaw !== undefined ? (Number(areaLandRaw) || 0) : (prev?.areaLand ?? 0),
+      areaBuild:
+        areaBuildRaw !== undefined ? (Number(areaBuildRaw) || 0) : (prev?.areaBuild ?? 0),
+      needs: pick<string>(row?.needs, prev?.needs) ?? '',
+      status: pick<any>(row?.status, prev?.status) ?? 'standby',
+      startDate,
+      typology: pick<any>(row?.typology, prev?.typology),
+      projectManager: pick<string>(row?.project_manager, prev?.projectManager) ?? '',
+    } as Project;
+  };
+
   // Global State (Mocking a database)
   const [projects, setProjects] = useState<Project[]>([]);
   
@@ -198,7 +233,37 @@ const App: React.FC = () => {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'projects', filter: `org_id=eq.${orgId}` },
-        () => {
+        (payload) => {
+          // Apply realtime payload immediately for better UX, then reconcile via a debounced refresh.
+          try {
+            const eventType = String((payload as any)?.eventType || (payload as any)?.event || '').toUpperCase();
+            if (eventType === 'DELETE') {
+              const deletedId = (payload as any)?.old?.id;
+              if (deletedId) {
+                setProjects((prev) => prev.filter((p) => p.id !== String(deletedId)));
+              }
+            } else {
+              const row = (payload as any)?.new;
+              const rowId = row?.id;
+              if (rowId) {
+                setProjects((prev) => {
+                  const idx = prev.findIndex((p) => p.id === String(rowId));
+                  const prior = idx >= 0 ? prev[idx] : undefined;
+                  const mapped = projectFromDbRow(row, prior);
+                  if (!mapped) return prev;
+                  if (idx >= 0) {
+                    const next = [...prev];
+                    next[idx] = mapped;
+                    return next;
+                  }
+                  return [mapped, ...prev];
+                });
+              }
+            }
+          } catch (e) {
+            console.error(e);
+          }
+
           if (timer) window.clearTimeout(timer);
           timer = window.setTimeout(() => {
             refreshProjects(orgId).catch((e) => console.error(e));

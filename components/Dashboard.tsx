@@ -30,6 +30,52 @@ const Dashboard: React.FC<Props> = ({ projects, useCloud = false, orgId = null }
   const [metricsError, setMetricsError] = useState<string | null>(null);
   const refreshTimer = useRef<number | null>(null);
 
+  type TxRow = { id: string; type: string; cost: number; occurred_at: string };
+  const txRowsRef = useRef<TxRow[]>([]);
+  const txRangeRef = useRef<{ start: string; end: string } | null>(null);
+
+  const computeMetricsFromRows = (rows: TxRow[]) => {
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthsBack = 5;
+
+    const monthKeys: { key: string; label: string }[] = [];
+    for (let i = monthsBack; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const label = d.toLocaleString('es', { month: 'short' }).replace('.', '');
+      monthKeys.push({ key, label: label.charAt(0).toUpperCase() + label.slice(1) });
+    }
+
+    const buckets = new Map<string, { ingresos: number; gastos: number }>();
+    for (const m of monthKeys) buckets.set(m.key, { ingresos: 0, gastos: 0 });
+
+    const accumulate = (type: string, cost: number, occurredAt: string) => {
+      const d = new Date(occurredAt);
+      if (Number.isNaN(d.getTime())) return;
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const b = buckets.get(key);
+      if (!b) return;
+      if (String(type).toUpperCase() === 'INGRESO') b.ingresos += cost;
+      else b.gastos += cost;
+    };
+
+    for (const r of rows) {
+      accumulate(r.type, Number(r.cost ?? 0) || 0, String(r.occurred_at));
+    }
+
+    const monthKey = `${monthStart.getFullYear()}-${String(monthStart.getMonth() + 1).padStart(2, '0')}`;
+    const monthBucket = buckets.get(monthKey) ?? { ingresos: 0, gastos: 0 };
+    setMonthIncome(monthBucket.ingresos);
+    setMonthExpense(monthBucket.gastos);
+
+    const nextLine: LinePoint[] = monthKeys.map((m) => {
+      const b = buckets.get(m.key) ?? { ingresos: 0, gastos: 0 };
+      return { name: m.label, ingresos: Math.round(b.ingresos), gastos: Math.round(b.gastos) };
+    });
+    setLineData(nextLine);
+  };
+
   const pieData = useMemo(() => {
     const labelFor = (t: Project['typology']) => {
       switch (t) {
@@ -72,6 +118,9 @@ const Dashboard: React.FC<Props> = ({ projects, useCloud = false, orgId = null }
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const monthsBack = 5;
     const rangeStart = new Date(now.getFullYear(), now.getMonth() - monthsBack, 1);
+    const rangeStartIso = rangeStart.toISOString();
+    const rangeEndIso = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
+    txRangeRef.current = { start: rangeStartIso, end: rangeEndIso };
 
     const monthKeys: { key: string; label: string }[] = [];
     for (let i = monthsBack; i >= 0; i--) {
@@ -81,52 +130,38 @@ const Dashboard: React.FC<Props> = ({ projects, useCloud = false, orgId = null }
       monthKeys.push({ key, label: label.charAt(0).toUpperCase() + label.slice(1) });
     }
 
-    const buckets = new Map<string, { ingresos: number; gastos: number }>();
-    for (const m of monthKeys) buckets.set(m.key, { ingresos: 0, gastos: 0 });
-
-    const accumulate = (type: string, cost: number, occurredAt: string) => {
-      const d = new Date(occurredAt);
-      if (Number.isNaN(d.getTime())) return;
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      const b = buckets.get(key);
-      if (!b) return;
-      if (String(type).toUpperCase() === 'INGRESO') b.ingresos += cost;
-      else b.gastos += cost;
-    };
-
     try {
       if (useCloud && orgId && isSupabaseConfigured) {
         const supabase = getSupabaseClient();
         const res = await supabase
           .from('transactions')
-          .select('type, cost, occurred_at')
+          .select('id, type, cost, occurred_at')
           .eq('org_id', orgId)
-          .gte('occurred_at', rangeStart.toISOString())
-          .lt('occurred_at', new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString())
+          .gte('occurred_at', rangeStartIso)
+          .lt('occurred_at', rangeEndIso)
           .order('occurred_at', { ascending: true });
 
         if (res.error) throw res.error;
-        for (const r of res.data ?? []) {
-          accumulate(r.type, Number(r.cost ?? 0), String(r.occurred_at));
-        }
+        const rows: TxRow[] = (res.data ?? []).map((r: any) => ({
+          id: String(r.id),
+          type: String(r.type ?? ''),
+          cost: Number(r.cost ?? 0) || 0,
+          occurred_at: String(r.occurred_at ?? ''),
+        }));
+        txRowsRef.current = rows;
+        computeMetricsFromRows(rows);
       } else {
         const raw = localStorage.getItem('transactions');
         const txs: any[] = raw ? JSON.parse(raw) : [];
-        for (const t of txs) {
-          accumulate(t.type, Number(t.cost ?? t.amount ?? 0), String(t.date));
-        }
+        const rows: TxRow[] = txs.map((t) => ({
+          id: String(t.id ?? `${t.type ?? ''}|${t.date ?? ''}|${t.cost ?? t.amount ?? 0}|${t.projectId ?? ''}|${t.description ?? ''}`),
+          type: String(t.type ?? ''),
+          cost: Number(t.cost ?? t.amount ?? 0) || 0,
+          occurred_at: String(t.date ?? ''),
+        }));
+        txRowsRef.current = rows;
+        computeMetricsFromRows(rows);
       }
-
-      const monthKey = `${monthStart.getFullYear()}-${String(monthStart.getMonth() + 1).padStart(2, '0')}`;
-      const monthBucket = buckets.get(monthKey) ?? { ingresos: 0, gastos: 0 };
-      setMonthIncome(monthBucket.ingresos);
-      setMonthExpense(monthBucket.gastos);
-
-      const nextLine: LinePoint[] = monthKeys.map((m) => {
-        const b = buckets.get(m.key) ?? { ingresos: 0, gastos: 0 };
-        return { name: m.label, ingresos: Math.round(b.ingresos), gastos: Math.round(b.gastos) };
-      });
-      setLineData(nextLine);
     } catch (e: any) {
       console.error(e);
       setMetricsError(e?.message || 'Error cargando métricas');
@@ -150,7 +185,58 @@ const Dashboard: React.FC<Props> = ({ projects, useCloud = false, orgId = null }
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'transactions', filter: `org_id=eq.${orgId}` },
-        () => {
+        (payload) => {
+          // Apply payload immediately for better UX, then reconcile via debounced reload.
+          try {
+            const eventType = String((payload as any)?.eventType || (payload as any)?.event || '').toUpperCase();
+
+            if (eventType === 'DELETE') {
+              const deletedId = (payload as any)?.old?.id;
+              if (deletedId) {
+                txRowsRef.current = txRowsRef.current.filter((r) => r.id !== String(deletedId));
+                computeMetricsFromRows(txRowsRef.current);
+              }
+            } else {
+              const row = (payload as any)?.new;
+              const rowId = row?.id;
+              if (rowId) {
+                const nextRow: TxRow = {
+                  id: String(rowId),
+                  type: String(row?.type ?? ''),
+                  cost: Number(row?.cost ?? 0) || 0,
+                  occurred_at: String(row?.occurred_at ?? ''),
+                };
+
+                const range = txRangeRef.current;
+                const occurred = new Date(nextRow.occurred_at);
+                const inRange =
+                  range && !Number.isNaN(occurred.getTime())
+                    ? occurred.getTime() >= new Date(range.start).getTime() && occurred.getTime() < new Date(range.end).getTime()
+                    : true;
+
+                const prev = txRowsRef.current;
+                const idx = prev.findIndex((r) => r.id === nextRow.id);
+
+                if (!inRange) {
+                  txRowsRef.current = idx >= 0 ? prev.filter((r) => r.id !== nextRow.id) : prev;
+                } else if (idx >= 0) {
+                  const next = [...prev];
+                  next[idx] = nextRow;
+                  next.sort((a, b) => new Date(a.occurred_at).getTime() - new Date(b.occurred_at).getTime());
+                  txRowsRef.current = next;
+                } else {
+                  const next = [...prev, nextRow];
+                  next.sort((a, b) => new Date(a.occurred_at).getTime() - new Date(b.occurred_at).getTime());
+                  txRowsRef.current = next;
+                }
+
+                computeMetricsFromRows(txRowsRef.current);
+              }
+            }
+          } catch (e) {
+            console.error(e);
+          }
+
           if (refreshTimer.current) window.clearTimeout(refreshTimer.current);
           refreshTimer.current = window.setTimeout(() => {
             loadMetrics();

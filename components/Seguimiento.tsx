@@ -63,6 +63,7 @@ interface ProgressLineState {
 }
 
 type TxRow = {
+  id: string;
   project_id: string | null;
   type: 'INGRESO' | 'GASTO' | string;
   cost: number;
@@ -195,6 +196,7 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
   const [metricsError, setMetricsError] = useState<string | null>(null);
   const refreshTimer = useRef<number | null>(null);
   const prevSelectedProjectIdRef = useRef<string>('');
+  const txRangeRef = useRef<{ start: string; end: string } | null>(null);
 
   const allProjects = useMemo(() => projects.slice(), [projects]);
   const projectsByCreated = useMemo(() => projects.slice(), [projects]);
@@ -204,6 +206,7 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
   );
 
   const activeProjects = useMemo(() => projects.filter(p => p.status === 'active'), [projects]);
+  const activeProjectsKey = useMemo(() => activeProjects.map((p) => p.id).join('|'), [activeProjects]);
   const filteredActiveProjects = useMemo(() => {
     const q = projectSearch.trim().toLowerCase();
     if (!q) return activeProjects;
@@ -711,18 +714,20 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
       const monthsBack = 11;
       const rangeStart = new Date(now.getFullYear(), now.getMonth() - monthsBack, 1);
       const rangeEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      txRangeRef.current = { start: rangeStart.toISOString(), end: rangeEnd.toISOString() };
 
       if (useCloud && orgId && isSupabaseConfigured) {
         const supabase = getSupabaseClient();
         const res = await supabase
           .from('transactions')
-          .select('project_id,type,cost,category,occurred_at')
+          .select('id,project_id,type,cost,category,occurred_at')
           .eq('org_id', orgId)
           .gte('occurred_at', rangeStart.toISOString())
           .lt('occurred_at', rangeEnd.toISOString())
           .order('occurred_at', { ascending: true });
         if (res.error) throw res.error;
         const rows: TxRow[] = (res.data ?? []).map((r: any) => ({
+          id: String(r.id),
           project_id: r.project_id ?? null,
           type: r.type,
           cost: Number(r.cost ?? 0) || 0,
@@ -737,6 +742,7 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
       const raw = localStorage.getItem('transactions');
       const txs: any[] = raw ? JSON.parse(raw) : [];
       const rows: TxRow[] = txs.map((t) => ({
+        id: String(t.id ?? `${t.type ?? ''}|${t.date ?? ''}|${t.cost ?? t.amount ?? 0}|${t.projectId ?? ''}|${t.description ?? ''}`),
         project_id: t.projectId ?? null,
         type: t.type,
         cost: Number(t.cost ?? t.amount ?? 0) || 0,
@@ -763,7 +769,59 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'transactions', filter: `org_id=eq.${orgId}` },
-        () => {
+        (payload) => {
+          // Apply payload immediately for better UX, then reconcile via debounced reload.
+          try {
+            const eventType = String((payload as any)?.eventType || (payload as any)?.event || '').toUpperCase();
+
+            if (eventType === 'DELETE') {
+              const deletedId = (payload as any)?.old?.id;
+              if (deletedId) {
+                setTransactions((prev) => prev.filter((t) => t.id !== String(deletedId)));
+              }
+            } else {
+              const row = (payload as any)?.new;
+              const rowId = row?.id;
+              if (rowId) {
+                const nextRow: TxRow = {
+                  id: String(rowId),
+                  project_id: row?.project_id ?? null,
+                  type: row?.type,
+                  cost: Number(row?.cost ?? 0) || 0,
+                  category: row?.category ?? null,
+                  occurred_at: String(row?.occurred_at ?? ''),
+                };
+
+                const range = txRangeRef.current;
+                const occurred = new Date(nextRow.occurred_at);
+                const inRange =
+                  range && !Number.isNaN(occurred.getTime())
+                    ? occurred.getTime() >= new Date(range.start).getTime() && occurred.getTime() < new Date(range.end).getTime()
+                    : true;
+
+                setTransactions((prev) => {
+                  const idx = prev.findIndex((t) => t.id === nextRow.id);
+                  if (!inRange) {
+                    return idx >= 0 ? prev.filter((t) => t.id !== nextRow.id) : prev;
+                  }
+
+                  if (idx >= 0) {
+                    const next = [...prev];
+                    next[idx] = nextRow;
+                    next.sort((a, b) => new Date(a.occurred_at).getTime() - new Date(b.occurred_at).getTime());
+                    return next;
+                  }
+
+                  const next = [...prev, nextRow];
+                  next.sort((a, b) => new Date(a.occurred_at).getTime() - new Date(b.occurred_at).getTime());
+                  return next;
+                });
+              }
+            }
+          } catch (e) {
+            console.error(e);
+          }
+
           if (refreshTimer.current) window.clearTimeout(refreshTimer.current);
           refreshTimer.current = window.setTimeout(() => {
             loadTransactions();
@@ -848,14 +906,14 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
       loadSummary();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeProjects.length]);
+  }, [activeProjectsKey, selectedProjectId]);
 
   // Refresh global summary on cross-device changes.
   useEffect(() => {
     if (activeProjects.length === 0) return;
     if (!selectedProjectId) loadSummary();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [syncVersion]);
+  }, [syncVersion, selectedProjectId]);
 
   return (
     <div className="space-y-6">
