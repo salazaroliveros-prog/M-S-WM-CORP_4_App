@@ -16,10 +16,12 @@ function json(data: unknown, init: ResponseInit = {}) {
 
 function cors(origin: string | null) {
   const headers: Record<string, string> = {
-    'access-control-allow-headers': 'authorization, x-client-info, apikey, content-type',
-    'access-control-allow-methods': 'POST, OPTIONS',
-    'access-control-allow-origin': origin ?? '*',
-    'access-control-max-age': '86400',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-client-info, apikey',
+    'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+    'Access-Control-Allow-Origin': origin ?? '*',
+    'Access-Control-Allow-Credentials': 'true',
+    'Access-Control-Max-Age': '86400',
+    'Vary': 'Origin',
   };
   return headers;
 }
@@ -136,7 +138,8 @@ Deno.serve(async (req) => {
   const headers = cors(originAllowed ? origin : null);
 
   if (req.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers });
+    // Respond to preflight quickly with OK and CORS headers
+    return new Response(null, { status: 200, headers });
   }
 
   if (req.method !== 'POST') {
@@ -158,9 +161,34 @@ Deno.serve(async (req) => {
       auth: { persistSession: false },
     });
 
-    const body = await req.json().catch(() => ({}));
+    // parse JSON body defensively
+    let body: any = {};
+    try {
+      body = await req.json();
+    } catch {
+      body = {};
+    }
     const action = normalizeAction(body?.action);
     const token = String(body?.token ?? '').trim();
+    // Debug-only action to test DB connectivity and environment without requiring a token
+    if (action === 'status_debug') {
+      try {
+        const { data, error } = await supabaseAdmin.from('employee_webauthn_credentials').select('id').limit(1);
+        return json(
+          {
+            debug: {
+              SUPABASE_URL_present: !!SUPABASE_URL,
+              SERVICE_ROLE_KEY_present: !!SERVICE_ROLE_KEY,
+              sampleQueryError: error ? String(error?.message ?? JSON.stringify(error)) : null,
+              sampleCount: Array.isArray(data) ? data.length : null,
+            },
+          },
+          { status: 200, headers }
+        );
+      } catch (e: any) {
+        return json({ debug: { SUPABASE_URL_present: !!SUPABASE_URL, SERVICE_ROLE_KEY_present: !!SERVICE_ROLE_KEY, thrown: e?.message ?? String(e) } }, { status: 200, headers });
+      }
+    }
     if (!token || token.length < 16) {
       return json({ error: 'Token inválido' }, { status: 400, headers });
     }
