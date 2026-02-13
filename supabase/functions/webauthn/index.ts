@@ -170,6 +170,14 @@ Deno.serve(async (req) => {
     }
     const action = normalizeAction(body?.action);
     const token = String(body?.token ?? '').trim();
+    // Simulated status response for testing (bypasses DB/token validation)
+    if (action === 'status_simulate') {
+      const expectedRPID = hostnameFromOrigin(origin ?? '');
+      return json(
+        { employeeName: 'Empleado de prueba', credentialCount: 0, rpId: expectedRPID || 'example.com' },
+        { status: 200, headers }
+      );
+    }
     // Debug-only action to test DB connectivity and environment without requiring a token
     if (action === 'status_debug') {
       try {
