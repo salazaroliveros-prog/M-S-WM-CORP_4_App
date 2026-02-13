@@ -178,3 +178,5 @@ on public.apu_templates
 for all
 using (app.is_org_member(org_id))
 with check (app.is_org_member(org_id));
+
+commit;
