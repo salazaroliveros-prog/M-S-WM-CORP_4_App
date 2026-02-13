@@ -25,6 +25,8 @@ import {
   createRequisition,
   listRequisitions,
   updateRequisitionStatus,
+  listRequisitionItems,
+  setRequisitionItemsActualUnitCosts,
   listEmployees,
   createEmployee,
   listEmployeeContracts,
@@ -320,6 +322,32 @@ const App: React.FC = () => {
       if (timer) window.clearTimeout(timer);
       supabase.removeChannel(channel);
     };
+  }, [useCloud, orgId]);
+
+  // Cross-device freshness: when the tab becomes active again, force a background refresh.
+  useEffect(() => {
+    if (!useCloud || !orgId) return;
+
+    let lastKick = 0;
+    const kick = () => {
+      const now = Date.now();
+      if (now - lastKick < 800) return;
+      lastKick = now;
+      refreshProjects(orgId).catch((e) => console.error(e));
+      setCloudSyncVersion((v) => v + 1);
+    };
+
+    const onVis = () => {
+      if (document.visibilityState === 'visible') kick();
+    };
+
+    window.addEventListener('focus', kick);
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      window.removeEventListener('focus', kick);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [useCloud, orgId]);
 
   const handleCreateProject = async (partial: Partial<Project>) => {
@@ -731,6 +759,19 @@ const App: React.FC = () => {
 
     if (!useCloud || !orgId) return;
     await updateRequisitionStatus(orgId, requisitionId, status);
+  };
+
+  const handleListRequisitionItems = async (requisitionId: string) => {
+    if (!useCloud || !orgId) return null;
+    return await listRequisitionItems(orgId, requisitionId);
+  };
+
+  const handleSaveRequisitionActualCosts = async (
+    requisitionId: string,
+    updates: Array<{ id: string; actualUnitCost: number | null }>
+  ) => {
+    if (!useCloud || !orgId) return;
+    await setRequisitionItemsActualUnitCosts(orgId, requisitionId, updates);
   };
 
   const handleListEmployees = async () => {
@@ -1185,6 +1226,8 @@ const App: React.FC = () => {
                 onCreateRequisition={handleCreateRequisition}
                 onListRequisitions={handleListRequisitions}
                 onUpdateRequisitionStatus={handleUpdateRequisitionStatus}
+                onListRequisitionItems={handleListRequisitionItems}
+                onSaveRequisitionActualCosts={handleSaveRequisitionActualCosts}
                 canApproveRequisitions={canApproveRequisitions}
                 onListSuppliers={handleListSuppliers}
                 onUpsertSupplier={handleUpsertSupplier}

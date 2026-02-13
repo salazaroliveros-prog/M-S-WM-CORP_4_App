@@ -19,6 +19,8 @@ View your app in AI Studio: https://ai.studio/apps/temp/2
    - Copie [.env.local.example](.env.local.example) a `.env.local` y complete `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY`.
    - En Supabase Auth, habilite **Anonymous sign-ins** (o reemplace por un login real).
     - Aplique la migración SQL en `supabase/migrations/20260204_init.sql`.
+      - (Opcional) Para registrar **costos reales por material (factura)** aplique también:
+         - [supabase/migrations/20260209_requisition_items_actual_unit_cost.sql](supabase/migrations/20260209_requisition_items_actual_unit_cost.sql)
     - (Opcional) Para **APUs + precios desde Web con cache** aplique también `supabase/migrations/20260204_catalog_apu_prices.sql`.
 3. Run the app:
    `npm run dev`
@@ -92,6 +94,26 @@ Para validar integridad de datos reales en una instalación donde usas **una sol
 - Ejecuta: [supabase/scripts/validate_real_data_single_org.sql](supabase/scripts/validate_real_data_single_org.sql)
 
 Incluye conteos por tabla, chequeos de integridad y un resumen compacto (SUMMARY) para detectar orfandades/inconsistencias.
+
+## Costos reales (factura) en Compras
+
+La app permite registrar el **costo unitario real** por material al momento de marcar una requisición como **RECIBIDA**.
+
+Flujo:
+
+1) Ir a **COMPRAS → Historial**.
+2) En una requisición en estado **APROBADO**, presionar **“Factura / Recibido”**.
+3) Ingresar **P.U. real (factura)** por ítem.
+4) Presionar **“Guardar y marcar RECIBIDO”**.
+
+Notas:
+
+- Por defecto esto es **admin-only** (mismo permiso de aprobar/recibir requisiciones).
+- En **SEGUIMIENTO** aparece la comparativa **Materiales: Planificado vs Ejecutado** (cantidades y costos), donde lo ejecutado se toma de requisiciones **RECIBIDAS**.
+
+### Verificación rápida (SQL)
+
+- Ejecuta: [supabase/scripts/verify_actual_material_costs_single_org.sql](supabase/scripts/verify_actual_material_costs_single_org.sql)
 
 ### Limpieza de datos de prueba (SQL)
 

@@ -8,8 +8,10 @@ interface Props {
   syncVersion?: number;
   onLoadBudget?: (projectId: string) => Promise<{ lines: BudgetLine[] } | null>;
   onCreateRequisition?: (data: RequisitionData, supplierName: string | null) => Promise<void>;
-  onListRequisitions?: () => Promise<Array<{ id: string; projectId: string | null; requestedAt: string; supplierName?: string | null; supplierNote?: string | null; total: number; status: string }>>;
+  onListRequisitions?: () => Promise<Array<{ id: string; projectId: string | null; requestedAt: string; supplierName?: string | null; supplierNote?: string | null; total: number; actualTotal?: number; status: string }>>;
   onUpdateRequisitionStatus?: (requisitionId: string, status: 'sent' | 'confirmed' | 'received' | 'cancelled') => Promise<void>;
+  onListRequisitionItems?: (requisitionId: string) => Promise<Array<{ id: string; name: string; unit: string; quantity: number; unitPrice: number | null; actualUnitCost: number | null }> | null>;
+  onSaveRequisitionActualCosts?: (requisitionId: string, updates: Array<{ id: string; actualUnitCost: number | null }>) => Promise<void>;
   canApproveRequisitions?: boolean;
   onListSuppliers?: () => Promise<Array<{ id: string; name: string; whatsapp?: string | null; phone?: string | null; defaultNoteTemplate?: string | null; termsTemplate?: string | null }> | null>;
   onUpsertSupplier?: (input: { id?: string | null; name: string; whatsapp?: string | null; phone?: string | null; defaultNoteTemplate?: string | null; termsTemplate?: string | null }) => Promise<{ id: string } | null>;
@@ -152,6 +154,8 @@ const Compras: React.FC<Props> = ({
   onCreateRequisition,
   onListRequisitions,
   onUpdateRequisitionStatus,
+  onListRequisitionItems,
+  onSaveRequisitionActualCosts,
   canApproveRequisitions,
   onListSuppliers,
   onUpsertSupplier,
@@ -389,7 +393,14 @@ const Compras: React.FC<Props> = ({
     };
   }, [selectedProjectId, onLoadBudget]);
 
-  const [history, setHistory] = useState<Array<{ id: string; projectId: string | null; requestedAt: string; supplierName?: string | null; supplierNote?: string | null; total: number; status: string }>>([]);
+  const [history, setHistory] = useState<Array<{ id: string; projectId: string | null; requestedAt: string; supplierName?: string | null; supplierNote?: string | null; total: number; actualTotal?: number; status: string }>>([]);
+
+  const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
+  const [invoiceReqId, setInvoiceReqId] = useState<string | null>(null);
+  const [invoiceItems, setInvoiceItems] = useState<Array<{ id: string; name: string; unit: string; quantity: number; unitPrice: number | null; actualUnitCost: number | null }>>([]);
+  const [invoiceDraftCosts, setInvoiceDraftCosts] = useState<Record<string, string>>({});
+  const [invoiceError, setInvoiceError] = useState<string | null>(null);
+  const [invoiceSaving, setInvoiceSaving] = useState(false);
 
   const statusLabel = (s: string) => {
     const v = String(s || '').toLowerCase();
@@ -411,6 +422,62 @@ const Compras: React.FC<Props> = ({
       }
     } catch (e: any) {
       alert(e?.message || 'No se pudo actualizar el estado.');
+    }
+  };
+
+  const openInvoiceModal = async (requisitionId: string) => {
+    if (!onListRequisitionItems) {
+      alert('No disponible: cargar items de requisición.');
+      return;
+    }
+
+    setInvoiceError(null);
+    setInvoiceReqId(requisitionId);
+    setIsInvoiceModalOpen(true);
+    setInvoiceItems([]);
+    setInvoiceDraftCosts({});
+
+    try {
+      const items = await onListRequisitionItems(requisitionId);
+      const safe = Array.isArray(items) ? items : [];
+      setInvoiceItems(safe);
+      const initial: Record<string, string> = {};
+      for (const it of safe) {
+        if (!it?.id) continue;
+        initial[String(it.id)] = it.actualUnitCost === null || it.actualUnitCost === undefined ? '' : String(it.actualUnitCost);
+      }
+      setInvoiceDraftCosts(initial);
+    } catch (e: any) {
+      setInvoiceError(e?.message || 'No se pudieron cargar los items.');
+    }
+  };
+
+  const saveInvoiceAndMarkReceived = async () => {
+    if (!invoiceReqId) return;
+    if (!onSaveRequisitionActualCosts) {
+      alert('No disponible: guardar costos reales.');
+      return;
+    }
+    setInvoiceSaving(true);
+    setInvoiceError(null);
+    try {
+      const updates = invoiceItems.map((it) => {
+        const raw = String(invoiceDraftCosts[String(it.id)] ?? '').trim();
+        if (!raw) return { id: it.id, actualUnitCost: null };
+        const n = Number(raw);
+        return { id: it.id, actualUnitCost: Number.isFinite(n) ? Math.max(0, n) : null };
+      });
+
+      await onSaveRequisitionActualCosts(invoiceReqId, updates);
+      await handleStatusAction(invoiceReqId, 'received');
+      setIsInvoiceModalOpen(false);
+      setInvoiceReqId(null);
+      setInvoiceItems([]);
+      setInvoiceDraftCosts({});
+    } catch (e: any) {
+      setInvoiceError(e?.message || 'No se pudo guardar la factura/costos.');
+    } finally {
+      setInvoiceSaving(false);
     }
   };
 
@@ -1022,7 +1089,12 @@ const Compras: React.FC<Props> = ({
                   <tr key={h.id}>
                     <td className="p-3">{new Date(h.requestedAt).toLocaleDateString()}</td>
                     <td className="p-3">{h.supplierName || h.supplierNote || '-'}</td>
-                    <td className="p-3">Q{h.total.toFixed(2)}</td>
+                    <td className="p-3">
+                      <div className="font-medium">Q{Number(h.total ?? 0).toFixed(2)}</div>
+                      {typeof h.actualTotal === 'number' && h.actualTotal > 0 && (
+                        <div className="text-xs text-gray-500">Real: Q{Number(h.actualTotal ?? 0).toFixed(2)}</div>
+                      )}
+                    </td>
                     <td className="p-3"><span className="text-gray-700 font-bold">{statusLabel(h.status)}</span></td>
                     {onUpdateRequisitionStatus && (
                       <td className="p-3">
@@ -1037,14 +1109,14 @@ const Compras: React.FC<Props> = ({
                               Aprobar
                             </button>
                           )}
-                          {(String(h.status).toLowerCase() === 'confirmed' && canApproveRequisitions) && (
+                          {canApproveRequisitions && (
                             <button
                               type="button"
-                              onClick={() => handleStatusAction(h.id, 'received')}
+                              onClick={() => openInvoiceModal(h.id)}
                               className="text-xs px-3 py-1 rounded bg-gray-200 hover:bg-gray-300"
-                              title="Marcar como recibido"
+                              title="Ingresar costos reales y marcar como recibido"
                             >
-                              Recibido
+                              Factura / Recibido
                             </button>
                           )}
                           {(['draft', 'sent', 'confirmed'].includes(String(h.status).toLowerCase())) && (
@@ -1165,6 +1237,110 @@ const Compras: React.FC<Props> = ({
               >
                 Agregar seleccionados al pedido
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isInvoiceModalOpen && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" role="dialog" aria-modal="true" aria-label="Ingresar factura / costos reales">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl">
+            <div className="flex items-center justify-between p-4 border-b">
+              <div>
+                <div className="font-bold text-navy-900">Factura / Costos reales por material</div>
+                <div className="text-xs text-gray-500">Ingrese el costo unitario real (factura) por cada material.</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (invoiceSaving) return;
+                  setIsInvoiceModalOpen(false);
+                  setInvoiceReqId(null);
+                  setInvoiceItems([]);
+                  setInvoiceDraftCosts({});
+                  setInvoiceError(null);
+                }}
+                className="p-2 rounded hover:bg-gray-100"
+                aria-label="Cerrar"
+                title="Cerrar"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-4">
+              {invoiceError && (
+                <div className="mb-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2">
+                  {invoiceError}
+                </div>
+              )}
+
+              {invoiceItems.length === 0 ? (
+                <div className="text-sm text-gray-500">No hay items para esta requisición (o no se pudieron cargar).</div>
+              ) : (
+                <div className="overflow-auto border rounded">
+                  <table className="w-full text-sm text-left">
+                    <thead className="bg-gray-50 sticky top-0">
+                      <tr>
+                        <th className="p-2">Material</th>
+                        <th className="p-2">Unidad</th>
+                        <th className="p-2 text-right">Cantidad</th>
+                        <th className="p-2 text-right">P.U. (plan)</th>
+                        <th className="p-2 text-right">P.U. real (factura)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {invoiceItems.map((it) => (
+                        <tr key={it.id} className="border-t">
+                          <td className="p-2 font-medium text-navy-900">{it.name}</td>
+                          <td className="p-2 text-gray-600">{it.unit}</td>
+                          <td className="p-2 text-right font-mono">{formatQty(Number(it.quantity) || 0)}</td>
+                          <td className="p-2 text-right font-mono">{it.unitPrice === null ? '—' : `Q${Number(it.unitPrice || 0).toFixed(2)}`}</td>
+                          <td className="p-2 text-right">
+                            <input
+                              type="number"
+                              min={0}
+                              step="0.01"
+                              value={invoiceDraftCosts[String(it.id)] ?? ''}
+                              onChange={(e) => setInvoiceDraftCosts((prev) => ({ ...prev, [String(it.id)]: e.target.value }))}
+                              className="w-28 p-2 border rounded text-right focus:ring-mustard-500 focus:border-mustard-500"
+                              placeholder="0.00"
+                              aria-label={`Costo real unitario: ${it.name}`}
+                              title="Costo real unitario (factura)"
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              <div className="mt-4 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={invoiceSaving}
+                  onClick={() => {
+                    setIsInvoiceModalOpen(false);
+                    setInvoiceReqId(null);
+                    setInvoiceItems([]);
+                    setInvoiceDraftCosts({});
+                    setInvoiceError(null);
+                  }}
+                  className="px-4 py-2 rounded border hover:bg-gray-50 text-sm"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={invoiceSaving}
+                  onClick={saveInvoiceAndMarkReceived}
+                  className="px-4 py-2 rounded bg-gray-200 hover:bg-gray-300 text-sm font-semibold"
+                  title="Guardar costos reales y marcar como recibido"
+                >
+                  {invoiceSaving ? 'Guardando…' : 'Guardar y marcar RECIBIDO'}
+                </button>
+              </div>
             </div>
           </div>
         </div>

@@ -1338,14 +1338,14 @@ export async function createRequisition(
 
 export async function listRequisitions(
   orgId: string
-): Promise<Array<{ id: string; projectId: string | null; requestedAt: string; supplierName: string | null; supplierNote: string | null; total: number; status: string }>> {
+): Promise<Array<{ id: string; projectId: string | null; requestedAt: string; supplierName: string | null; supplierNote: string | null; total: number; actualTotal: number; status: string }>> {
   const supabase = getSupabaseClient();
 
   requireNonEmpty(orgId, 'orgId');
 
   const res = await supabase
     .from('v_requisition_totals')
-    .select('requisition_id, project_id, requested_at, total_amount, status, supplier_name, notes')
+    .select('requisition_id, project_id, requested_at, total_amount, actual_total_amount, status, supplier_name, notes')
     .eq('org_id', orgId)
     .order('requested_at', { ascending: false })
     .limit(20);
@@ -1359,6 +1359,7 @@ export async function listRequisitions(
     supplierName: r.supplier_name ? String(r.supplier_name) : null,
     supplierNote: r.notes ? String(r.notes) : null,
     total: Number(r.total_amount ?? 0),
+    actualTotal: Number(r.actual_total_amount ?? 0),
     status: r.status,
   }));
 }
@@ -1381,6 +1382,85 @@ export async function updateRequisitionStatus(
     .eq('id', requisitionId);
 
   if (res.error) throw res.error;
+}
+
+// -----------------------------------------------------------------------------
+// Requisition items (Compras) - invoice/actual costs
+// -----------------------------------------------------------------------------
+
+export type RequisitionItemRecord = {
+  id: string;
+  requisitionId: string;
+  orgId: string;
+  name: string;
+  unit: string;
+  quantity: number;
+  unitPrice: number | null;
+  actualUnitCost: number | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+const fromDbRequisitionItem = (r: any): RequisitionItemRecord => ({
+  id: String(r.id),
+  requisitionId: String(r.requisition_id),
+  orgId: String(r.org_id),
+  name: String(r.name ?? ''),
+  unit: String(r.unit ?? 'Unidad'),
+  quantity: Number(r.quantity ?? 0) || 0,
+  unitPrice: r.unit_price === null || r.unit_price === undefined ? null : Number(r.unit_price) || 0,
+  actualUnitCost: r.actual_unit_cost === null || r.actual_unit_cost === undefined ? null : Number(r.actual_unit_cost) || 0,
+  createdAt: String(r.created_at ?? new Date().toISOString()),
+  updatedAt: String(r.updated_at ?? new Date().toISOString()),
+});
+
+export async function listRequisitionItems(orgId: string, requisitionId: string): Promise<RequisitionItemRecord[]> {
+  const supabase = getSupabaseClient();
+  requireNonEmpty(orgId, 'orgId');
+  requireNonEmpty(requisitionId, 'requisitionId');
+
+  const res = await supabase
+    .from('requisition_items')
+    .select('*')
+    .eq('org_id', orgId)
+    .eq('requisition_id', requisitionId)
+    .order('created_at', { ascending: true });
+
+  if (res.error) throw res.error;
+  return (res.data ?? []).map(fromDbRequisitionItem);
+}
+
+export async function setRequisitionItemsActualUnitCosts(
+  orgId: string,
+  requisitionId: string,
+  updates: Array<{ id: string; actualUnitCost: number | null }>
+): Promise<void> {
+  const supabase = getSupabaseClient();
+  requireNonEmpty(orgId, 'orgId');
+  requireNonEmpty(requisitionId, 'requisitionId');
+  if (!Array.isArray(updates)) throw new Error('updates inválido');
+
+  const normalized = updates
+    .map((u) => ({
+      id: String(u.id),
+      actualUnitCost:
+        u.actualUnitCost === null || u.actualUnitCost === undefined
+          ? null
+          : (Number.isFinite(Number(u.actualUnitCost)) ? Math.max(0, Number(u.actualUnitCost)) : null),
+    }))
+    .filter((u) => !!u.id);
+
+  await Promise.all(
+    normalized.map(async (u) => {
+      const res = await supabase
+        .from('requisition_items')
+        .update({ actual_unit_cost: u.actualUnitCost })
+        .eq('org_id', orgId)
+        .eq('requisition_id', requisitionId)
+        .eq('id', u.id);
+      if (res.error) throw res.error;
+    })
+  );
 }
 
 // -----------------------------------------------------------------------------

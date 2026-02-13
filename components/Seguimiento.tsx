@@ -71,6 +71,14 @@ type TxRow = {
   occurred_at: string;
 };
 
+type ExecMaterialRow = {
+  name: string;
+  unit: string;
+  quantity: number;
+  unitPrice: number | null;
+  actualUnitCost: number | null;
+};
+
 type GanttTask = {
   key: string;
   name: string;
@@ -194,7 +202,10 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
 
   const [transactions, setTransactions] = useState<TxRow[]>([]);
   const [metricsError, setMetricsError] = useState<string | null>(null);
+  const [execMaterials, setExecMaterials] = useState<ExecMaterialRow[]>([]);
+  const [execMaterialsError, setExecMaterialsError] = useState<string | null>(null);
   const refreshTimer = useRef<number | null>(null);
+  const materialsRefreshTimer = useRef<number | null>(null);
   const prevSelectedProjectIdRef = useRef<string>('');
   const txRangeRef = useRef<{ start: string; end: string } | null>(null);
 
@@ -230,6 +241,8 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
       .replace(/\s+/g, ' ')
       .trim();
   };
+
+  const normalizeMatKey = (name: string, unit: string) => `${normalizeKey(name)}__${normalizeKey(unit || 'Unidad')}`;
 
   const storageKey = (projectId: string) => `wm_progress_v1_${projectId}`;
   const selectedKey = () => 'wm_seguimiento_selected_project_v1';
@@ -837,6 +850,152 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [useCloud, orgId]);
+
+  const loadExecutedMaterials = async (projectId: string) => {
+    setExecMaterialsError(null);
+    try {
+      if (!(useCloud && orgId && isSupabaseConfigured)) {
+        setExecMaterials([]);
+        return;
+      }
+
+      const supabase = getSupabaseClient();
+      const res = await supabase
+        .from('requisitions')
+        .select('id,status,project_id,requisition_items(id,name,unit,quantity,unit_price,actual_unit_cost)')
+        .eq('org_id', orgId)
+        .eq('project_id', projectId)
+        .eq('status', 'received')
+        .order('requested_at', { ascending: false })
+        .limit(200);
+
+      if (res.error) throw res.error;
+
+      const rows: ExecMaterialRow[] = [];
+      for (const r of (res.data ?? []) as any[]) {
+        const items = Array.isArray(r?.requisition_items) ? r.requisition_items : [];
+        for (const it of items) {
+          const name = String(it?.name ?? '').trim();
+          if (!name) continue;
+          const unit = String(it?.unit ?? 'Unidad').trim() || 'Unidad';
+          const quantity = Number(it?.quantity ?? 0) || 0;
+          const unitPrice = it?.unit_price === null || it?.unit_price === undefined ? null : (Number(it.unit_price) || 0);
+          const actualUnitCost = it?.actual_unit_cost === null || it?.actual_unit_cost === undefined ? null : (Number(it.actual_unit_cost) || 0);
+          rows.push({ name, unit, quantity: Math.max(0, quantity), unitPrice, actualUnitCost });
+        }
+      }
+      setExecMaterials(rows);
+    } catch (e: any) {
+      console.error(e);
+      setExecMaterialsError(e?.message || 'Error cargando materiales ejecutados (compras recibidas)');
+      setExecMaterials([]);
+    }
+  };
+
+  // Load executed materials for selected project, keep fresh via Realtime.
+  useEffect(() => {
+    if (!selectedProjectId) {
+      setExecMaterials([]);
+      setExecMaterialsError(null);
+      return;
+    }
+
+    loadExecutedMaterials(selectedProjectId);
+
+    if (!useCloud || !orgId || !isSupabaseConfigured) return;
+    const supabase = getSupabaseClient();
+
+    const scheduleReload = () => {
+      if (materialsRefreshTimer.current) window.clearTimeout(materialsRefreshTimer.current);
+      materialsRefreshTimer.current = window.setTimeout(() => {
+        loadExecutedMaterials(selectedProjectId);
+      }, 450);
+    };
+
+    const channel = supabase
+      .channel(`seguimiento-materiales:${orgId}:${selectedProjectId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'requisitions', filter: `org_id=eq.${orgId}` }, scheduleReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'requisition_items', filter: `org_id=eq.${orgId}` }, scheduleReload)
+      .subscribe();
+
+    return () => {
+      if (materialsRefreshTimer.current) window.clearTimeout(materialsRefreshTimer.current);
+      materialsRefreshTimer.current = null;
+      supabase.removeChannel(channel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedProjectId, useCloud, orgId, syncVersion]);
+
+  const materialComparisons = useMemo(() => {
+    if (!selectedProjectId) return null;
+
+    const planned = new Map<string, { name: string; unit: string; qty: number; cost: number }>();
+    for (const line of budgetLines) {
+      const lineQty = Number(line?.quantity ?? 0) || 0;
+      const mats = Array.isArray(line?.materials) ? line.materials : [];
+      for (const m of mats) {
+        const name = String(m?.name ?? '').trim();
+        if (!name) continue;
+        const unit = String(m?.unit ?? 'Unidad').trim() || 'Unidad';
+        const qtyPer = Number(m?.quantityPerUnit ?? 0) || 0;
+        const unitPrice = Number(m?.unitPrice ?? 0) || 0;
+        const qty = Math.max(0, lineQty * qtyPer);
+        const cost = qty * Math.max(0, unitPrice);
+        const key = normalizeMatKey(name, unit);
+        const prev = planned.get(key);
+        if (prev) planned.set(key, { ...prev, qty: prev.qty + qty, cost: prev.cost + cost });
+        else planned.set(key, { name, unit, qty, cost });
+      }
+    }
+
+    const executed = new Map<string, { name: string; unit: string; qty: number; cost: number }>();
+    for (const it of execMaterials) {
+      const name = String(it?.name ?? '').trim();
+      if (!name) continue;
+      const unit = String(it?.unit ?? 'Unidad').trim() || 'Unidad';
+      const qty = Math.max(0, Number(it?.quantity ?? 0) || 0);
+      const price = it.actualUnitCost !== null && it.actualUnitCost !== undefined
+        ? Math.max(0, Number(it.actualUnitCost) || 0)
+        : Math.max(0, Number(it.unitPrice ?? 0) || 0);
+      const cost = qty * price;
+      const key = normalizeMatKey(name, unit);
+      const prev = executed.get(key);
+      if (prev) executed.set(key, { ...prev, qty: prev.qty + qty, cost: prev.cost + cost });
+      else executed.set(key, { name, unit, qty, cost });
+    }
+
+    const allKeys = new Set<string>([...planned.keys(), ...executed.keys()]);
+    const rows = Array.from(allKeys).map((key) => {
+      const p = planned.get(key);
+      const e = executed.get(key);
+      return {
+        key,
+        name: (p?.name || e?.name || '').trim(),
+        unit: (p?.unit || e?.unit || 'Unidad').trim(),
+        planQty: p?.qty ?? 0,
+        execQty: e?.qty ?? 0,
+        planCost: p?.cost ?? 0,
+        execCost: e?.cost ?? 0,
+      };
+    });
+
+    const totals = rows.reduce(
+      (acc, r) => ({
+        planQty: acc.planQty + r.planQty,
+        execQty: acc.execQty + r.execQty,
+        planCost: acc.planCost + r.planCost,
+        execCost: acc.execCost + r.execCost,
+      }),
+      { planQty: 0, execQty: 0, planCost: 0, execCost: 0 }
+    );
+
+    const top = rows
+      .slice()
+      .sort((a, b) => (b.planCost + b.execCost) - (a.planCost + a.execCost))
+      .slice(0, 12);
+
+    return { totals, top };
+  }, [selectedProjectId, budgetLines, execMaterials]);
 
   const loadSummary = async () => {
     const ids = activeProjects.map(p => p.id);
@@ -1491,6 +1650,91 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {selectedProject && (
+        <div className="bg-white p-6 rounded-xl shadow-md mt-6">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div>
+              <div className="font-bold text-navy-900">Materiales: Planificado vs Ejecutado</div>
+              <div className="text-xs text-gray-500">
+                Planificado desde Presupuestos. Ejecutado desde Compras (solo requisiciones RECIBIDAS).
+              </div>
+            </div>
+            {materialComparisons && (
+              <div className="text-xs text-gray-600">
+                <div><span className="font-semibold">Plan (costo):</span> {currency.format(Math.round(materialComparisons.totals.planCost))}</div>
+                <div><span className="font-semibold">Real (costo):</span> {currency.format(Math.round(materialComparisons.totals.execCost))}</div>
+              </div>
+            )}
+          </div>
+
+          {execMaterialsError && (
+            <div className="mt-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2">
+              {execMaterialsError}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-4">
+            <div className="bg-white p-4 rounded-xl shadow border border-gray-200">
+              <div className="font-bold text-gray-700 mb-2">Cantidades (top materiales)</div>
+              <div className="h-72">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={(materialComparisons?.top ?? []).map((r) => {
+                      const maxChars = 14;
+                      const label = r.name.length > maxChars ? `${r.name.slice(0, maxChars)}…` : r.name;
+                      return {
+                        name: label,
+                        plan: Math.round((Number(r.planQty) || 0) * 100) / 100,
+                        ejec: Math.round((Number(r.execQty) || 0) * 100) / 100,
+                      };
+                    })}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" interval={1} angle={-25} textAnchor="end" height={60} />
+                    <YAxis />
+                    <Tooltip />
+                    <Legend />
+                    <Bar dataKey="plan" fill="#64748b" name="Planificado" />
+                    <Bar dataKey="ejec" fill="#0ea5e9" name="Ejecutado" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            <div className="bg-white p-4 rounded-xl shadow border border-gray-200">
+              <div className="font-bold text-gray-700 mb-2">Costos (top materiales)</div>
+              <div className="h-72">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={(materialComparisons?.top ?? []).map((r) => {
+                      const maxChars = 14;
+                      const label = r.name.length > maxChars ? `${r.name.slice(0, maxChars)}…` : r.name;
+                      return {
+                        name: label,
+                        plan: Math.round(Number(r.planCost) || 0),
+                        real: Math.round(Number(r.execCost) || 0),
+                      };
+                    })}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" interval={1} angle={-25} textAnchor="end" height={60} />
+                    <YAxis tickFormatter={(v: any) => {
+                      const n = Number(v) || 0;
+                      if (Math.abs(n) >= 1000) return `${Math.round(n / 1000)}k`;
+                      return String(Math.round(n));
+                    }} />
+                    <Tooltip formatter={(v: any) => currency.format(Number(v) || 0)} />
+                    <Legend />
+                    <Bar dataKey="plan" fill="#f59e0b" name="Planificado" />
+                    <Bar dataKey="real" fill="#22c55e" name="Real (factura)" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

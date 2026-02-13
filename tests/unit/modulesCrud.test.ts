@@ -356,6 +356,7 @@ describe('module CRUD smoke (unit, Supabase wiring)', () => {
                 project_id: 'p1',
                 requested_at: '2026-02-05',
                 total_amount: 100,
+                actual_total_amount: 0,
                 status: 'sent',
                 supplier_name: null,
                 notes: null,
