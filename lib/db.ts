@@ -2003,8 +2003,16 @@ export async function getAttendanceTokenInfo(token: string): Promise<{ orgId: st
 
 export async function webauthnInvoke(action: string, body: any): Promise<any> {
   const supabase = getSupabaseClient();
+  // Ensure we send the user's JWT so the gateway verifies identity
+  const sessionResp = await supabase.auth.getSession();
+  const accessToken = (sessionResp as any)?.data?.session?.access_token;
+  if (!accessToken) throw new Error('No active session. Login required to call webauthn functions.');
+
   const res = await supabase.functions.invoke('webauthn', {
     body: { action, ...body },
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
   });
   if (res.error) throw res.error;
   return res.data;
