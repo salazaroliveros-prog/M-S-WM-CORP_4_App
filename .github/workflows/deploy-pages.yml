@@ -44,6 +44,12 @@ jobs:
           # NOTE: Only use the public ANON key here.
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          # Service account used by the app to abrir sesión en Supabase
+          # WARNING: cualquier variable que empiece con VITE_ queda embebida en el JS
+          # del frontend. Usa un usuario de servicio limitado solo a esta organización.
+          VITE_SUPABASE_EMAIL: ${{ secrets.VITE_SUPABASE_EMAIL }}
+          VITE_SUPABASE_PASSWORD: ${{ secrets.VITE_SUPABASE_PASSWORD }}
+          VITE_ADMIN_EMAIL: ${{ secrets.VITE_ADMIN_EMAIL }}
           VITE_ORG_NAME: ${{ secrets.VITE_ORG_NAME }}
         run: npm run build:pages
 
