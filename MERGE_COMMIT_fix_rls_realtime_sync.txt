@@ -1,0 +1,3 @@
+chore: sync migrations and add verify script (merged fixes)
+
+Merged fixes from `fix/rls-realtime-sync` to `main`. This merge commit brings idempotent RLS/realtime migrations, Supabase health checks, verification script and TS env typings into `main`.
