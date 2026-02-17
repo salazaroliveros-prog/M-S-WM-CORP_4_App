@@ -21,13 +21,21 @@ for insert
 to anon, authenticated
 with check (created_by = auth.uid());
 
--- org_members: allow reading membership under anon/authenticated JWTs
 drop policy if exists org_members_select on public.org_members;
 create policy org_members_select
 on public.org_members
 for select
 to anon, authenticated
-using (app.is_org_member(org_id));
+using (
+	-- Miembro viendo su propia fila
+	user_id = auth.uid()
+	-- O el creador de la organización viendo cualquier miembro de su org
+	or exists (
+		select 1 from public.organizations o
+		where o.id = org_id
+			and o.created_by = auth.uid()
+	)
+);
 
 -- org_members: allow creator to insert their own membership if needed
 drop policy if exists org_members_insert on public.org_members;
@@ -36,14 +44,19 @@ on public.org_members
 for insert
 to anon, authenticated
 with check (
-	app.is_org_admin(org_id)
-	or (
-		user_id = auth.uid()
-		and exists (
-			select 1 from public.organizations o
-			where o.id = org_id
-				and o.created_by = auth.uid()
-		)
+	-- Usuario insertando su propia membresía
+	(user_id = auth.uid()
+	 and exists (
+		 select 1 from public.organizations o
+		 where o.id = org_id
+			 and o.created_by = auth.uid()
+	 )
+	)
+	-- O el creador de la organización gestionando miembros
+	or exists (
+		select 1 from public.organizations o
+		where o.id = org_id
+			and o.created_by = auth.uid()
 	)
 );
 
