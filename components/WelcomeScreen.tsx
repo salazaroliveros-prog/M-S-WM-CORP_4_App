@@ -15,8 +15,8 @@ const WelcomeScreen: React.FC<Props> = ({ onLogin }) => {
     e.preventDefault();
     setError('');
     const trimmedEmail = email.trim();
-    if (!trimmedEmail || !password) {
-      setError('Email y contraseña son requeridos');
+    if (!password) {
+      setError('La contraseña es requerida');
       return;
     }
     try {

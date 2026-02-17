@@ -37,9 +37,7 @@ import Compras from './components/Compras';
 import RRHH from './components/RRHH';
 import Cotizador from './components/Cotizador';
 
-const ADMIN_EMAILS: string[] = [
-  ((import.meta as any).env?.VITE_ADMIN_EMAIL as string | undefined) ?? 'salazaroliveros@gmail.com',
-];
+const LOCAL_PASSWORD_KEY = 'ms_local_admin_password_v1';
 
 const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -215,36 +213,49 @@ const App: React.FC = () => {
     return await createEmployee(orgId, input);
   };
 
-  const handleLogin = async (email: string, password: string) => {
-    const normalizedEmail = String(email || '').trim().toLowerCase();
-    const allowed = ADMIN_EMAILS.map((e) => String(e || '').trim().toLowerCase()).filter(Boolean);
-
-    if (!allowed.includes(normalizedEmail)) {
-      const err = new Error('Solo el usuario administrador autorizado puede iniciar sesión en este momento.');
-      setCloudError(err.message);
+  const handleLogin = async (_email: string, password: string) => {
+    const trimmedPassword = String(password || '').trim();
+    if (!trimmedPassword) {
+      const err = new Error('Contraseña requerida.');
       throw err;
     }
 
-    // Modo solo local (sin Supabase): permite acceso directo
-    if (!isSupabaseConfigured) {
-      setIsAuthenticated(true);
-      setCurrentView('INICIO');
-      return;
+    // Login 100% local por dispositivo, usando localStorage
+    const existingPassword = localStorage.getItem(LOCAL_PASSWORD_KEY);
+    if (!existingPassword) {
+      // Primera vez en este dispositivo: registra la contraseña ingresada
+      localStorage.setItem(LOCAL_PASSWORD_KEY, trimmedPassword);
+    } else if (existingPassword !== trimmedPassword) {
+      const err = new Error('Contraseña incorrecta para este dispositivo.');
+      throw err;
     }
 
-    try {
-      setCloudError(null);
-      await ensureSupabaseSession(email, password);
-      const resolvedOrgId = await getOrCreateOrgId('M&S Construcción');
-      setOrgId(resolvedOrgId);
-      await refreshProjects(resolvedOrgId);
-      setIsAuthenticated(true);
-      setCurrentView('INICIO'); // Default after login
-    } catch (e: any) {
-      console.error(e);
-      const msg = e?.message || 'Error inicializando Supabase';
-      setCloudError(msg);
-      throw new Error(msg);
+    // En este punto el login local fue exitoso
+    setIsAuthenticated(true);
+    setCurrentView('INICIO');
+
+    // Inicializa sesión de Supabase en segundo plano con una cuenta técnica fija
+    if (isSupabaseConfigured) {
+      try {
+        setCloudError(null);
+        const metaEnv = ((import.meta as any).env ?? {}) as Record<string, any>;
+        const serviceEmail = metaEnv.VITE_SUPABASE_EMAIL as string | undefined;
+        const servicePassword = metaEnv.VITE_SUPABASE_PASSWORD as string | undefined;
+
+        if (!serviceEmail || !servicePassword) {
+          setCloudError('Supabase configurado sin VITE_SUPABASE_EMAIL o VITE_SUPABASE_PASSWORD. La app funciona solo en modo local.');
+          return;
+        }
+
+        await ensureSupabaseSession(serviceEmail, servicePassword);
+        const resolvedOrgId = await getOrCreateOrgId('M&S Construcción');
+        setOrgId(resolvedOrgId);
+        await refreshProjects(resolvedOrgId);
+      } catch (e: any) {
+        console.error(e);
+        const msg = e?.message || 'Error inicializando Supabase para datos en la nube. La app seguirá funcionando en modo local en este dispositivo.';
+        setCloudError(msg);
+      }
     }
   };
 
@@ -353,9 +364,6 @@ const App: React.FC = () => {
           {cloudError && (
             <div className="mb-4 bg-red-50 border border-red-200 text-red-700 p-3 rounded">
               <strong>Error Supabase:</strong> {cloudError}
-              <div className="text-xs text-red-600 mt-1">
-                Configure <code>VITE_SUPABASE_URL</code> y <code>VITE_SUPABASE_ANON_KEY</code> o habilite Anonymous Sign-ins.
-              </div>
             </div>
           )}
 
