@@ -38,6 +38,93 @@ import RRHH from './components/RRHH';
 import Cotizador from './components/Cotizador';
 
 const LOCAL_PASSWORD_KEY = 'ms_local_admin_password_v1';
+const LOCAL_TRANSACTIONS_KEY = 'transactions';
+const PENDING_TRANSACTIONS_KEY = 'wm_pending_transactions_v1';
+const LOCAL_REQUISITIONS_KEY = 'wm_offline_requisitions_v1';
+const PENDING_REQUISITIONS_KEY = 'wm_pending_requisitions_v1';
+const LOCAL_EMPLOYEES_KEY = 'wm_offline_employees_v1';
+const PENDING_EMPLOYEES_KEY = 'wm_pending_employees_v1';
+
+const syncOfflineTransactions = async (targetOrgId: string) => {
+  try {
+    const raw = localStorage.getItem(PENDING_TRANSACTIONS_KEY);
+    const pending: any[] = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(pending) || pending.length === 0) return;
+
+    const stillPending: any[] = [];
+
+    for (const tx of pending) {
+      try {
+        await dbCreateTransaction(targetOrgId, tx);
+      } catch (e) {
+        console.error('Error sincronizando transacción pendiente', e);
+        stillPending.push(tx);
+      }
+    }
+
+    localStorage.setItem(PENDING_TRANSACTIONS_KEY, JSON.stringify(stillPending));
+  } catch (e) {
+    console.error('Error procesando transacciones pendientes', e);
+  }
+};
+
+const syncOfflineRequisitions = async (targetOrgId: string) => {
+  try {
+    const raw = localStorage.getItem(PENDING_REQUISITIONS_KEY);
+    const pending: any[] = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(pending) || pending.length === 0) return;
+
+    const stillPending: any[] = [];
+
+    for (const entry of pending) {
+      try {
+        const { projectId, supplierName, sourceBudgetLineId, items, sourceLineName } = entry || {};
+        if (!projectId || !Array.isArray(items) || items.length === 0) {
+          continue;
+        }
+        await createRequisition(
+          targetOrgId,
+          projectId,
+          supplierName ?? null,
+          sourceBudgetLineId ?? null,
+          items,
+          'sent',
+          sourceLineName ?? null
+        );
+      } catch (e) {
+        console.error('Error sincronizando requisición pendiente', e);
+        stillPending.push(entry);
+      }
+    }
+
+    localStorage.setItem(PENDING_REQUISITIONS_KEY, JSON.stringify(stillPending));
+  } catch (e) {
+    console.error('Error procesando requisiciones pendientes', e);
+  }
+};
+
+const syncOfflineEmployees = async (targetOrgId: string) => {
+  try {
+    const raw = localStorage.getItem(PENDING_EMPLOYEES_KEY);
+    const pending: any[] = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(pending) || pending.length === 0) return;
+
+    const stillPending: any[] = [];
+
+    for (const emp of pending) {
+      try {
+        await createEmployee(targetOrgId, emp);
+      } catch (e) {
+        console.error('Error sincronizando empleado pendiente', e);
+        stillPending.push(emp);
+      }
+    }
+
+    localStorage.setItem(PENDING_EMPLOYEES_KEY, JSON.stringify(stillPending));
+  } catch (e) {
+    console.error('Error procesando empleados pendientes', e);
+  }
+};
 
 const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -130,7 +217,28 @@ const App: React.FC = () => {
 
   const handleCreateTransaction = async (tx: any) => {
     if (!isSupabaseConfigured || !orgId) {
-      // Keep existing local behavior (Inicio already writes localStorage), so no-op here.
+      try {
+        const raw = localStorage.getItem(LOCAL_TRANSACTIONS_KEY);
+        const existing: any[] = raw ? JSON.parse(raw) : [];
+
+        const withId = tx && tx.id ? tx : { ...tx, id: crypto.randomUUID() };
+        const withDate = (withId as any).date ? withId : { ...withId, date: new Date().toISOString() };
+
+        existing.push(withDate);
+        localStorage.setItem(LOCAL_TRANSACTIONS_KEY, JSON.stringify(existing));
+
+        // Marcar también como pendiente para sincronizar cuando haya conexión
+        try {
+          const rawPending = localStorage.getItem(PENDING_TRANSACTIONS_KEY);
+          const pending: any[] = rawPending ? JSON.parse(rawPending) : [];
+          pending.push(withDate);
+          localStorage.setItem(PENDING_TRANSACTIONS_KEY, JSON.stringify(pending));
+        } catch (err) {
+          console.error('Error marcando transacción como pendiente', err);
+        }
+      } catch (e) {
+        console.error('Error guardando transacción local', e);
+      }
       return;
     }
     await dbCreateTransaction(orgId, tx);
@@ -187,7 +295,47 @@ const App: React.FC = () => {
   };
 
   const handleCreateRequisition = async (data: RequisitionData, supplierName: string | null) => {
-    if (!isSupabaseConfigured || !orgId) return;
+    if (!isSupabaseConfigured || !orgId) {
+      try {
+        const nowIso = new Date().toISOString();
+
+        // Historial local para Compras
+        const raw = localStorage.getItem(LOCAL_REQUISITIONS_KEY);
+        const existing: any[] = raw ? JSON.parse(raw) : [];
+        const total = (data.items ?? []).reduce((acc, it) => acc + (Number(it.quantity) || 0), 0);
+        const localReq = {
+          id: crypto.randomUUID(),
+          projectId: data.projectId ?? null,
+          requestedAt: nowIso,
+          supplierName: supplierName ?? null,
+          supplierNote: data.sourceLineName ?? null,
+          total,
+          actualTotal: 0,
+          status: 'sent',
+        };
+        existing.unshift(localReq);
+        localStorage.setItem(LOCAL_REQUISITIONS_KEY, JSON.stringify(existing));
+
+        // Cola de sincronización
+        try {
+          const rawPending = localStorage.getItem(PENDING_REQUISITIONS_KEY);
+          const pending: any[] = rawPending ? JSON.parse(rawPending) : [];
+          pending.push({
+            projectId: data.projectId,
+            supplierName,
+            sourceBudgetLineId: data.sourceBudgetLineId ?? null,
+            items: data.items,
+            sourceLineName: data.sourceLineName ?? null,
+          });
+          localStorage.setItem(PENDING_REQUISITIONS_KEY, JSON.stringify(pending));
+        } catch (err) {
+          console.error('Error marcando requisición como pendiente', err);
+        }
+      } catch (e) {
+        console.error('Error guardando requisición local', e);
+      }
+      return;
+    }
     await createRequisition(
       orgId,
       data.projectId,
@@ -199,17 +347,75 @@ const App: React.FC = () => {
   };
 
   const handleListRequisitions = async () => {
-    if (!isSupabaseConfigured || !orgId) return [];
+    if (!isSupabaseConfigured || !orgId) {
+      try {
+        const raw = localStorage.getItem(LOCAL_REQUISITIONS_KEY);
+        const existing: any[] = raw ? JSON.parse(raw) : [];
+        return existing;
+      } catch (e) {
+        console.error('Error leyendo requisiciones locales', e);
+        return [];
+      }
+    }
     return await listRequisitions(orgId);
   };
 
   const handleListEmployees = async () => {
-    if (!isSupabaseConfigured || !orgId) return null;
+    if (!isSupabaseConfigured || !orgId) {
+      try {
+        const raw = localStorage.getItem(LOCAL_EMPLOYEES_KEY);
+        const existing: any[] = raw ? JSON.parse(raw) : [];
+        return existing;
+      } catch (e) {
+        console.error('Error leyendo empleados locales', e);
+        return null;
+      }
+    }
     return await listEmployees(orgId);
   };
 
   const handleCreateEmployee = async (input: any) => {
-    if (!isSupabaseConfigured || !orgId) return null;
+    if (!isSupabaseConfigured || !orgId) {
+      try {
+        const raw = localStorage.getItem(LOCAL_EMPLOYEES_KEY);
+        const existing: any[] = raw ? JSON.parse(raw) : [];
+        const localEmp = {
+          id: crypto.randomUUID(),
+          name: input?.name ?? '',
+          dpi: input?.dpi ?? null,
+          phone: input?.phone ?? null,
+          position: input?.position ?? '',
+          dailyRate: Number(input?.dailyRate ?? 0) || 0,
+          status: 'active',
+          projectId: input?.projectId ?? null,
+          createdAt: new Date().toISOString(),
+        };
+        existing.unshift(localEmp);
+        localStorage.setItem(LOCAL_EMPLOYEES_KEY, JSON.stringify(existing));
+
+        // Cola de sincronización
+        try {
+          const rawPending = localStorage.getItem(PENDING_EMPLOYEES_KEY);
+          const pending: any[] = rawPending ? JSON.parse(rawPending) : [];
+          pending.push({
+            name: localEmp.name,
+            dpi: localEmp.dpi ?? undefined,
+            phone: localEmp.phone ?? undefined,
+            position: localEmp.position,
+            dailyRate: localEmp.dailyRate,
+            projectId: localEmp.projectId ?? undefined,
+          });
+          localStorage.setItem(PENDING_EMPLOYEES_KEY, JSON.stringify(pending));
+        } catch (err) {
+          console.error('Error marcando empleado como pendiente', err);
+        }
+
+        return localEmp;
+      } catch (e) {
+        console.error('Error guardando empleado local', e);
+        return null;
+      }
+    }
     return await createEmployee(orgId, input);
   };
 
@@ -251,6 +457,12 @@ const App: React.FC = () => {
         const resolvedOrgId = await getOrCreateOrgId('M&S Construcción');
         setOrgId(resolvedOrgId);
         await refreshProjects(resolvedOrgId);
+        await Promise.all([
+          syncOfflineTransactions(resolvedOrgId),
+          syncOfflineRequisitions(resolvedOrgId),
+          syncOfflineEmployees(resolvedOrgId),
+        ]);
+        await syncOfflineTransactions(resolvedOrgId);
       } catch (e: any) {
         console.error(e);
         const msg = e?.message || 'Error inicializando Supabase para datos en la nube. La app seguirá funcionando en modo local en este dispositivo.';
@@ -332,6 +544,15 @@ const App: React.FC = () => {
       <div className="md:hidden fixed top-0 w-full bg-navy-900 text-white z-50 flex items-center justify-between p-4 shadow-md">
         <div>
           <h1 className="font-bold text-mustard-500">M&S</h1>
+          <div className="text-[10px] text-gray-200 mt-1">
+            {cloudError
+              ? 'Error nube · usando modo local'
+              : !isSupabaseConfigured
+                ? 'Modo local (sin nube)'
+                : orgId
+                  ? 'Nube sincronizada'
+                  : 'Conectando con nube...'}
+          </div>
         </div>
         <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
           {isMobileMenuOpen ? <X /> : <Menu />}
@@ -387,6 +608,25 @@ const App: React.FC = () => {
                </div>
                <div className="text-xs text-gray-500">
                  {new Date().toLocaleTimeString()}
+               </div>
+               <div className="mt-1">
+                 {cloudError ? (
+                   <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-red-100 text-red-700 border border-red-200">
+                     Error nube · modo local
+                   </span>
+                 ) : !isSupabaseConfigured ? (
+                   <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-gray-100 text-gray-700 border border-gray-200">
+                     Modo local (sin nube)
+                   </span>
+                 ) : orgId ? (
+                   <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-green-100 text-green-700 border border-green-200">
+                     Nube sincronizada
+                   </span>
+                 ) : (
+                   <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-amber-100 text-amber-700 border border-amber-200">
+                     Conectando con nube...
+                   </span>
+                 )}
                </div>
              </div>
           </header>

@@ -1911,11 +1911,7 @@ export async function setEmployeeAttendanceToken(employeeId: string, token: stri
   requireNonEmpty(employeeId, 'employeeId');
   const tokenTrimmed = normalizeAttendanceToken(token);
 
-  // This RPC is admin-only; ensure we have a real JWT session.
-  const sess = await supabase.auth.getSession();
-  if (!sess.data.session) {
-    await ensureSupabaseSession();
-  }
+  // This RPC is admin-only; assume caller already ensured an admin session.
 
   const res = await supabase.rpc('set_employee_attendance_token', {
     p_employee_id: employeeId,
