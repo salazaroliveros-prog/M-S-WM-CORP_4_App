@@ -17,6 +17,9 @@ type Handlers = {
   signInAnonymously?: () =>
     | Promise<{ error: any | null; data?: { session?: any | null } }>
     | { error: any | null; data?: { session?: any | null } };
+  signInWithPassword?: () =>
+    | Promise<{ error: any | null; data?: { session?: any | null } }>
+    | { error: any | null; data?: { session?: any | null } };
   setSession?: (args: { access_token: string; refresh_token: string }) =>
     | Promise<{ error: any | null }>
     | { error: any | null };
@@ -33,6 +36,7 @@ export type SupabaseMock = {
   auth: {
     getSession: () => Promise<{ data: { session: any | null } }>;
     signInAnonymously: () => Promise<{ error: any | null; data?: { session?: any | null } }>;
+    signInWithPassword: () => Promise<{ error: any | null; data?: { session?: any | null } }>;
     setSession: (args: { access_token: string; refresh_token: string }) => Promise<{ error: any | null }>;
     getUser: () => Promise<{ data: { user: any | null }; error: any | null }>;
   };
@@ -132,6 +136,13 @@ export function createSupabaseMock(handlers: Handlers = {}): SupabaseMock {
         calls.push({ type: 'auth.signInAnonymously' });
         const out = handlers.signInAnonymously
           ? handlers.signInAnonymously()
+          : ({ error: null, data: { session: null } } satisfies { error: any | null; data?: { session?: any | null } });
+        return await Promise.resolve(out);
+      },
+      signInWithPassword: async () => {
+        calls.push({ type: 'auth.signInWithPassword' });
+        const out = handlers.signInWithPassword
+          ? handlers.signInWithPassword()
           : ({ error: null, data: { session: null } } satisfies { error: any | null; data?: { session?: any | null } });
         return await Promise.resolve(out);
       },

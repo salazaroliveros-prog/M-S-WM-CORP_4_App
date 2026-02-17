@@ -35,6 +35,10 @@ import Compras from './components/Compras';
 import RRHH from './components/RRHH';
 import Cotizador from './components/Cotizador';
 
+const ADMIN_EMAILS: string[] = [
+  ((import.meta as any).env?.VITE_ADMIN_EMAIL as string | undefined) ?? 'salazaroliveros@gmail.com',
+];
+
 const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentView, setCurrentView] = useState<ViewState>('WELCOME');
@@ -199,7 +203,15 @@ const App: React.FC = () => {
     return await createEmployee(orgId, input);
   };
 
-  const handleLogin = () => {
+  const handleLogin = (email: string, password: string) => {
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    const allowed = ADMIN_EMAILS.map((e) => String(e || '').trim().toLowerCase()).filter(Boolean);
+
+    if (!allowed.includes(normalizedEmail)) {
+      setCloudError('Solo el usuario administrador autorizado puede iniciar sesión en este momento.');
+      return;
+    }
+
     setIsAuthenticated(true);
     setCurrentView('INICIO'); // Default after login
 
@@ -208,7 +220,7 @@ const App: React.FC = () => {
       (async () => {
         try {
           setCloudError(null);
-          await ensureSupabaseSession();
+          await ensureSupabaseSession(email, password);
           const resolvedOrgId = await getOrCreateOrgId('M&S Construcción');
           setOrgId(resolvedOrgId);
           await refreshProjects(resolvedOrgId);

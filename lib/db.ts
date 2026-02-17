@@ -137,23 +137,27 @@ function defaultOrgName(): string {
   return name && String(name).trim() ? String(name).trim() : 'M&S Construcción';
 }
 
-export async function ensureSupabaseSession(): Promise<void> {
+export async function ensureSupabaseSession(email: string, password: string): Promise<void> {
   const supabase = getSupabaseClient();
   const { data } = await supabase.auth.getSession();
   if (data.session?.access_token) return;
 
-  // Prefer anonymous sign-in for simple kiosk/admin-password UI.
-  const anon = await supabase.auth.signInAnonymously();
-  if (anon.error) {
+  const trimmedEmail = String(email || '').trim();
+  const trimmedPassword = String(password || '');
+
+  if (!trimmedEmail || !trimmedPassword) {
+    throw new Error('Email y contraseña requeridos para iniciar sesión en Supabase.');
+  }
+
+  const signIn = await supabase.auth.signInWithPassword({ email: trimmedEmail, password: trimmedPassword });
+  if (signIn.error) {
     throw new Error(
-      `No se pudo iniciar sesión en Supabase. Habilite Anonymous Sign-ins en Auth o implemente login por email. Detalle: ${anon.error.message}`
+      `No se pudo iniciar sesión en Supabase con email/contraseña. Verifique que el usuario exista y que las credenciales sean correctas. Detalle: ${signIn.error.message}`
     );
   }
 
-  const session = anon.data?.session;
+  const session = signIn.data?.session;
   if (session?.access_token && session.refresh_token) {
-    // Force the client to adopt the new session immediately.
-    // This avoids a race where subsequent PostgREST requests are still treated as anon.
     const setRes = await supabase.auth.setSession({
       access_token: session.access_token,
       refresh_token: session.refresh_token,
@@ -161,12 +165,10 @@ export async function ensureSupabaseSession(): Promise<void> {
     if (setRes.error) throw setRes.error;
   }
 
-  // Wait briefly for the auth state to be fully usable by downstream queries.
   const deadline = Date.now() + 2500;
-  let lastSession: any = null;
   while (Date.now() < deadline) {
     const verify = await supabase.auth.getSession();
-    lastSession = verify.data.session;
+    const lastSession = verify.data.session;
     if (lastSession?.access_token) {
       const userRes = await supabase.auth.getUser();
       if (userRes.data.user?.id) return;
@@ -190,8 +192,7 @@ export async function getOrCreateOrgId(orgName = defaultOrgName()): Promise<stri
 
   let sess = await supabase.auth.getSession();
   if (!sess.data.session) {
-    await ensureSupabaseSession();
-    sess = await supabase.auth.getSession();
+    throw new Error('No hay sesión activa de Supabase. Inicie sesión antes de crear la organización.');
   }
   const userId = sess.data.session?.user?.id;
   if (!userId) {
@@ -212,19 +213,9 @@ export async function getOrCreateOrgId(orgName = defaultOrgName()): Promise<stri
     const msg = String((created.error as any)?.message || created.error);
     const isRls = msg.toLowerCase().includes('row-level security') && msg.toLowerCase().includes('organizations');
     if (isRls) {
-      // This almost always means the request reached PostgREST without a valid JWT.
-      // Clear any stale client auth state, establish a fresh session, then retry.
-      try {
-        await supabase.auth.signOut();
-      } catch {}
-
-      await ensureSupabaseSession();
-
-      for (const delayMs of [150, 350, 700]) {
-        await new Promise((r) => setTimeout(r, delayMs));
-        created = await tryCreate();
-        if (!created.error) break;
-      }
+      throw new Error(
+        'Error de seguridad al crear la organización en Supabase (RLS en tabla organizations). Ejecuta el script supabase/scripts/fix_org_insert_policy.sql en tu proyecto de Supabase para corregir las políticas y vuelve a intentarlo.'
+      );
     }
   }
 

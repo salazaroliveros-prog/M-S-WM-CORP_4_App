@@ -38,14 +38,14 @@ describe('lib/db Supabase wiring (unit)', () => {
       }),
     });
 
-    await expect(ensureSupabaseSession()).resolves.toBeUndefined();
+    await expect(ensureSupabaseSession('test@example.com', 'secret')).resolves.toBeUndefined();
 
     const callTypes = mockClient.calls.map((c) => c.type);
     expect(callTypes).toContain('auth.getSession');
-    expect(callTypes).not.toContain('auth.signInAnonymously');
+    expect(callTypes).not.toContain('auth.signInWithPassword');
   });
 
-  it('ensureSupabaseSession: signs in anonymously when no session', async () => {
+  it('ensureSupabaseSession: signs in with email/password when no session', async () => {
     let sessionCalls = 0;
     mockClient = createSupabaseMock({
       getSession: () => {
@@ -61,7 +61,7 @@ describe('lib/db Supabase wiring (unit)', () => {
           },
         };
       },
-      signInAnonymously: () => ({
+        signInWithPassword: () => ({
         error: null,
         data: { session: { access_token: 'access', refresh_token: 'refresh' } },
       }),
@@ -69,11 +69,11 @@ describe('lib/db Supabase wiring (unit)', () => {
       getUser: () => ({ data: { user: { id: 'u1' } }, error: null }),
     });
 
-    await expect(ensureSupabaseSession()).resolves.toBeUndefined();
+    await expect(ensureSupabaseSession('test@example.com', 'secret')).resolves.toBeUndefined();
 
     const callTypes = mockClient.calls.map((c) => c.type);
     expect(callTypes).toContain('auth.getSession');
-    expect(callTypes).toContain('auth.signInAnonymously');
+    expect(callTypes).toContain('auth.signInWithPassword');
   });
 
   it('getOrCreateOrgId: returns membership org_id if present', async () => {

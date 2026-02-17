@@ -2,21 +2,24 @@ import React, { useState } from 'react';
 import { Lock, ArrowRight } from 'lucide-react';
 
 interface Props {
-  onLogin: () => void;
+  onLogin: (email: string, password: string) => void;
 }
 
 const WelcomeScreen: React.FC<Props> = ({ onLogin }) => {
   const appIconUrl = `${import.meta.env.BASE_URL}header-logo.png`;
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (password === 'admin123') { // Simple hardcoded password as requested
-      onLogin();
-    } else {
-      setError('Contraseña incorrecta');
+    setError('');
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail || !password) {
+      setError('Email y contraseña son requeridos');
+      return;
     }
+    onLogin(trimmedEmail, password);
   };
 
   return (
@@ -42,11 +45,24 @@ const WelcomeScreen: React.FC<Props> = ({ onLogin }) => {
 
         <form onSubmit={handleSubmit} className="space-y-6 backdrop-blur-sm bg-white/5 p-8 rounded-2xl border border-white/10">
           <div>
-            <label className="block text-gray-400 text-sm mb-2 text-left">Contraseña de Administrador</label>
+            <label className="block text-gray-400 text-sm mb-2 text-left">Correo electrónico</label>
+            <div className="relative">
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full bg-black/50 border border-gray-700 rounded-lg py-3 px-4 text-white focus:outline-none focus:border-mustard-500 focus:ring-1 focus:ring-mustard-500 transition-all"
+                placeholder="admin@empresa.com"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-gray-400 text-sm mb-2 text-left">Contraseña</label>
             <div className="relative">
               <Lock className="absolute left-3 top-3 text-gray-500" size={18} />
-              <input 
-                type="password" 
+              <input
+                type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full bg-black/50 border border-gray-700 rounded-lg py-3 pl-10 pr-4 text-white focus:outline-none focus:border-mustard-500 focus:ring-1 focus:ring-mustard-500 transition-all"
