@@ -12,6 +12,8 @@ import {
   createTransaction as dbCreateTransaction,
   loadBudgetForProject,
   saveBudgetForProject,
+  loadProgressForProject,
+  saveProgressForProject,
   importMaterialPricesFromCsvUrl,
   importMaterialPricesFromCsvText,
   suggestLineFromApuCatalog,
@@ -146,6 +148,16 @@ const App: React.FC = () => {
     await saveBudgetForProject(orgId, projectId, typology, indirectPct, lines as any);
   };
 
+  const handleLoadProgress = async (projectId: string) => {
+    if (!isSupabaseConfigured || !orgId) return null;
+    return await loadProgressForProject(orgId, projectId);
+  };
+
+  const handleSaveProgress = async (projectId: string, payload: any) => {
+    if (!isSupabaseConfigured || !orgId) return;
+    await saveProgressForProject(orgId, projectId, payload);
+  };
+
   const handleImportMaterialPrices = async (input: { url: string; vendor: string; currency: string }) => {
     if (!isSupabaseConfigured || !orgId) throw new Error('Supabase no configurado.');
     return await importMaterialPricesFromCsvUrl(orgId, input);
@@ -203,32 +215,36 @@ const App: React.FC = () => {
     return await createEmployee(orgId, input);
   };
 
-  const handleLogin = (email: string, password: string) => {
+  const handleLogin = async (email: string, password: string) => {
     const normalizedEmail = String(email || '').trim().toLowerCase();
     const allowed = ADMIN_EMAILS.map((e) => String(e || '').trim().toLowerCase()).filter(Boolean);
 
     if (!allowed.includes(normalizedEmail)) {
-      setCloudError('Solo el usuario administrador autorizado puede iniciar sesión en este momento.');
+      const err = new Error('Solo el usuario administrador autorizado puede iniciar sesión en este momento.');
+      setCloudError(err.message);
+      throw err;
+    }
+
+    // Modo solo local (sin Supabase): permite acceso directo
+    if (!isSupabaseConfigured) {
+      setIsAuthenticated(true);
+      setCurrentView('INICIO');
       return;
     }
 
-    setIsAuthenticated(true);
-    setCurrentView('INICIO'); // Default after login
-
-    // Cloud init (Supabase) if configured
-    if (isSupabaseConfigured) {
-      (async () => {
-        try {
-          setCloudError(null);
-          await ensureSupabaseSession(email, password);
-          const resolvedOrgId = await getOrCreateOrgId('M&S Construcción');
-          setOrgId(resolvedOrgId);
-          await refreshProjects(resolvedOrgId);
-        } catch (e: any) {
-          console.error(e);
-          setCloudError(e?.message || 'Error inicializando Supabase');
-        }
-      })();
+    try {
+      setCloudError(null);
+      await ensureSupabaseSession(email, password);
+      const resolvedOrgId = await getOrCreateOrgId('M&S Construcción');
+      setOrgId(resolvedOrgId);
+      await refreshProjects(resolvedOrgId);
+      setIsAuthenticated(true);
+      setCurrentView('INICIO'); // Default after login
+    } catch (e: any) {
+      console.error(e);
+      const msg = e?.message || 'Error inicializando Supabase';
+      setCloudError(msg);
+      throw new Error(msg);
     }
   };
 
@@ -371,7 +387,13 @@ const App: React.FC = () => {
             {currentView === 'INICIO' && (
               <Inicio projects={projects} onViewChange={setCurrentView} onCreateTransaction={handleCreateTransaction} />
             )}
-            {currentView === 'DASHBOARD' && <Dashboard projects={projects} />}
+            {currentView === 'DASHBOARD' && (
+              <Dashboard
+                projects={projects}
+                useCloud={isSupabaseConfigured && !!orgId}
+                orgId={orgId}
+              />
+            )}
             {currentView === 'PROYECTOS' && (
               <Proyectos 
                 projects={projects} 
@@ -398,7 +420,16 @@ const App: React.FC = () => {
                 onImportApuTemplatesCsvText={handleImportApuTemplatesCsvText}
               />
             )}
-            {currentView === 'SEGUIMIENTO' && <Seguimiento projects={projects} />}
+            {currentView === 'SEGUIMIENTO' && (
+              <Seguimiento
+                projects={projects}
+                useCloud={isSupabaseConfigured && !!orgId}
+                orgId={orgId}
+                onLoadBudget={isSupabaseConfigured && orgId ? handleLoadBudget : undefined}
+                onLoadProgress={isSupabaseConfigured && orgId ? handleLoadProgress : undefined}
+                onSaveProgress={isSupabaseConfigured && orgId ? handleSaveProgress : undefined}
+              />
+            )}
             {currentView === 'COMPRAS' && (
               <Compras 
                 projects={projects} 

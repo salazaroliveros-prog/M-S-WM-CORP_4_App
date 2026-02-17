@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Lock, ArrowRight } from 'lucide-react';
 
 interface Props {
-  onLogin: (email: string, password: string) => void;
+  onLogin: (email: string, password: string) => Promise<void> | void;
 }
 
 const WelcomeScreen: React.FC<Props> = ({ onLogin }) => {
@@ -11,7 +11,7 @@ const WelcomeScreen: React.FC<Props> = ({ onLogin }) => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     const trimmedEmail = email.trim();
@@ -19,7 +19,12 @@ const WelcomeScreen: React.FC<Props> = ({ onLogin }) => {
       setError('Email y contraseña son requeridos');
       return;
     }
-    onLogin(trimmedEmail, password);
+    try {
+      await onLogin(trimmedEmail, password);
+    } catch (err: any) {
+      const msg = err?.message || 'No se pudo iniciar sesión. Verifique sus credenciales.';
+      setError(msg);
+    }
   };
 
   return (

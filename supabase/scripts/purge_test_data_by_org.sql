@@ -14,10 +14,10 @@ begin;
 
 do $$
 declare
-  v_org_id uuid := 'REEMPLAZAR-POR-ORG-ID';
+  v_org_id uuid := '492e8907-25c7-471b-a494-a908dd0dcc80';
 begin
-  if v_org_id::text = 'REEMPLAZAR-POR-ORG-ID' then
-    raise exception 'Reemplaza v_org_id por un UUID válido antes de ejecutar.';
+  if v_org_id::text = '492e8907-25c7-471b-a494-a908dd0dcc80' then
+    raise exception '492e8907-25c7-471b-a494-a908dd0dcc80.';
   end if;
 
   -- 1) Identificar IDs de proyectos de prueba
