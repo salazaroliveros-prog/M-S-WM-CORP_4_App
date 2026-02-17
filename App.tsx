@@ -24,6 +24,24 @@ import {
   listRequisitions,
   listEmployees,
   createEmployee,
+  listRequisitionItems,
+  setRequisitionItemsActualUnitCosts,
+  updateRequisitionStatus,
+  listSuppliers,
+  upsertSupplier,
+  deleteSupplier,
+  listOrgPayRates,
+  upsertOrgPayRates,
+  listEmployeeRateOverrides,
+  upsertEmployeeRateOverride,
+  deleteEmployeeRateOverride,
+  listEmployeeContracts,
+  upsertEmployeeContract,
+  listAttendanceForDate,
+  setEmployeeAttendanceToken,
+  listServiceQuotes,
+  upsertServiceQuote,
+  deleteServiceQuote,
 } from './lib/db';
 
 // Components
@@ -360,6 +378,77 @@ const App: React.FC = () => {
     return await listRequisitions(orgId);
   };
 
+  const handleUpdateRequisitionStatus = async (
+    requisitionId: string,
+    status: 'sent' | 'confirmed' | 'received' | 'cancelled'
+  ) => {
+    if (!isSupabaseConfigured || !orgId) return;
+    await updateRequisitionStatus(orgId, requisitionId, status);
+  };
+
+  const handleListRequisitionItems = async (
+    requisitionId: string
+  ): Promise<Array<{ id: string; name: string; unit: string; quantity: number; unitPrice: number | null; actualUnitCost: number | null }> | null> => {
+    if (!isSupabaseConfigured || !orgId) return null;
+    const rows = await listRequisitionItems(orgId, requisitionId);
+    return rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      unit: r.unit,
+      quantity: r.quantity,
+      unitPrice: r.unitPrice,
+      actualUnitCost: r.actualUnitCost,
+    }));
+  };
+
+  const handleSaveRequisitionActualCosts = async (
+    requisitionId: string,
+    updates: Array<{ id: string; actualUnitCost: number | null }>
+  ) => {
+    if (!isSupabaseConfigured || !orgId) return;
+    await setRequisitionItemsActualUnitCosts(orgId, requisitionId, updates);
+  };
+
+  const handleListSuppliers = async () => {
+    if (!isSupabaseConfigured || !orgId) return null;
+    const rows = await listSuppliers(orgId, 100);
+    return rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      whatsapp: r.whatsapp,
+      phone: r.phone,
+      defaultNoteTemplate: r.defaultNoteTemplate,
+      termsTemplate: r.termsTemplate,
+    }));
+  };
+
+  const handleUpsertSupplier = async (input: {
+    id?: string | null;
+    name: string;
+    whatsapp?: string | null;
+    phone?: string | null;
+    defaultNoteTemplate?: string | null;
+    termsTemplate?: string | null;
+  }): Promise<{ id: string } | null> => {
+    if (!isSupabaseConfigured || !orgId) return null;
+    const rec = await upsertSupplier(orgId, {
+      id: input.id ?? undefined,
+      name: input.name,
+      whatsapp: input.whatsapp ?? null,
+      phone: input.phone ?? null,
+      defaultNoteTemplate: input.defaultNoteTemplate ?? null,
+      termsTemplate: input.termsTemplate ?? null,
+      email: null,
+      notes: null,
+    });
+    return { id: rec.id };
+  };
+
+  const handleDeleteSupplier = async (supplierId: string) => {
+    if (!isSupabaseConfigured || !orgId) return;
+    await deleteSupplier(orgId, supplierId);
+  };
+
   const handleListEmployees = async () => {
     if (!isSupabaseConfigured || !orgId) {
       try {
@@ -417,6 +506,130 @@ const App: React.FC = () => {
       }
     }
     return await createEmployee(orgId, input);
+  };
+
+  const handleLoadPayRates = async (): Promise<Record<string, number> | null> => {
+    if (!isSupabaseConfigured || !orgId) return null;
+    return await listOrgPayRates(orgId);
+  };
+
+  const handleSavePayRates = async (payRates: Record<string, number>) => {
+    if (!isSupabaseConfigured || !orgId) return;
+    await upsertOrgPayRates(orgId, payRates);
+  };
+
+  const handleLoadEmployeeRateOverrides = async (): Promise<Record<string, number> | null> => {
+    if (!isSupabaseConfigured || !orgId) return null;
+    return await listEmployeeRateOverrides(orgId);
+  };
+
+  const handleUpsertEmployeeRateOverride = async (employeeId: string, dailyRate: number) => {
+    if (!isSupabaseConfigured || !orgId) return;
+    await upsertEmployeeRateOverride(orgId, employeeId, dailyRate);
+  };
+
+  const handleDeleteEmployeeRateOverride = async (employeeId: string) => {
+    if (!isSupabaseConfigured || !orgId) return;
+    await deleteEmployeeRateOverride(orgId, employeeId);
+  };
+
+  const handleListContracts = async (): Promise<any[] | null> => {
+    if (!isSupabaseConfigured || !orgId) return null;
+    return await listEmployeeContracts(orgId, 50);
+  };
+
+  const handleUpsertContract = async (input: any): Promise<any> => {
+    if (!isSupabaseConfigured || !orgId) return input;
+    return await upsertEmployeeContract(orgId, input);
+  };
+
+  const handleListAttendance = async (workDate: string): Promise<any[] | null> => {
+    if (!isSupabaseConfigured || !orgId) return null;
+    return await listAttendanceForDate(orgId, workDate);
+  };
+
+  const handleSetAttendanceToken = async (employeeId: string, token: string) => {
+    if (!isSupabaseConfigured || !orgId) return;
+    await setEmployeeAttendanceToken(employeeId, token);
+  };
+
+  const handleListQuotes = async () => {
+    if (!isSupabaseConfigured || !orgId) return [];
+    const rows = await listServiceQuotes(orgId, { limit: 50 });
+    return rows.map((r) => ({
+      id: r.id,
+      client: r.client,
+      phone: r.phone,
+      address: r.address,
+      serviceName: r.serviceName,
+      quantity: r.quantity,
+      unit: r.unit,
+      unitPrice: r.unitPrice,
+      total: r.total,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+    }));
+  };
+
+  const handleUpsertQuote = async (input: {
+    id?: string | null;
+    client: string;
+    phone?: string | null;
+    address?: string | null;
+    serviceName: string;
+    quantity: number;
+    unit?: string | null;
+    unitPrice?: number | null;
+    total?: number | null;
+  }) => {
+    if (!isSupabaseConfigured || !orgId) {
+      // En modo local, simplemente devolver un registro simulado para que el historial funcione en esta sesión.
+      const now = new Date().toISOString();
+      return {
+        id: input.id ?? crypto.randomUUID(),
+        client: input.client,
+        phone: input.phone ?? null,
+        address: input.address ?? null,
+        serviceName: input.serviceName,
+        quantity: input.quantity,
+        unit: input.unit ?? null,
+        unitPrice: input.unitPrice ?? null,
+        total: input.total ?? null,
+        createdAt: now,
+        updatedAt: now,
+      };
+    }
+
+    const rec = await upsertServiceQuote(orgId, {
+      id: input.id ?? null,
+      client: input.client,
+      phone: input.phone ?? null,
+      address: input.address ?? null,
+      serviceName: input.serviceName,
+      quantity: input.quantity,
+      unit: input.unit ?? null,
+      unitPrice: input.unitPrice ?? null,
+      total: input.total ?? null,
+    });
+
+    return {
+      id: rec.id,
+      client: rec.client,
+      phone: rec.phone,
+      address: rec.address,
+      serviceName: rec.serviceName,
+      quantity: rec.quantity,
+      unit: rec.unit,
+      unitPrice: rec.unitPrice,
+      total: rec.total,
+      createdAt: rec.createdAt,
+      updatedAt: rec.updatedAt,
+    };
+  };
+
+  const handleDeleteQuote = async (quoteId: string) => {
+    if (!isSupabaseConfigured || !orgId) return;
+    await deleteServiceQuote(orgId, quoteId);
   };
 
   const handleLogin = async (_email: string, password: string) => {
@@ -684,14 +897,40 @@ const App: React.FC = () => {
                 initialData={requisitionData}
                 onCreateRequisition={handleCreateRequisition}
                 onListRequisitions={handleListRequisitions}
+                onUpdateRequisitionStatus={isSupabaseConfigured && orgId ? handleUpdateRequisitionStatus : undefined}
+                onListRequisitionItems={isSupabaseConfigured && orgId ? handleListRequisitionItems : undefined}
+                onSaveRequisitionActualCosts={isSupabaseConfigured && orgId ? handleSaveRequisitionActualCosts : undefined}
+                canApproveRequisitions={isSupabaseConfigured && !!orgId}
+                onListSuppliers={isSupabaseConfigured && orgId ? handleListSuppliers : undefined}
+                onUpsertSupplier={isSupabaseConfigured && orgId ? handleUpsertSupplier : undefined}
+                onDeleteSupplier={isSupabaseConfigured && orgId ? handleDeleteSupplier : undefined}
               />
             )}
             {currentView === 'RRHH' && (
-              <RRHH projects={projects} onListEmployees={handleListEmployees} onCreateEmployee={handleCreateEmployee} />
+              <RRHH
+                projects={projects}
+                syncVersion={0}
+                isAdmin={isSupabaseConfigured && !!orgId}
+                onListEmployees={handleListEmployees}
+                onCreateEmployee={handleCreateEmployee}
+                onListContracts={isSupabaseConfigured && orgId ? handleListContracts : undefined}
+                onUpsertContract={isSupabaseConfigured && orgId ? handleUpsertContract : undefined}
+                onListAttendance={isSupabaseConfigured && orgId ? handleListAttendance : undefined}
+                onSetAttendanceToken={isSupabaseConfigured && orgId ? handleSetAttendanceToken : undefined}
+                onLoadPayRates={isSupabaseConfigured && orgId ? handleLoadPayRates : undefined}
+                onSavePayRates={isSupabaseConfigured && orgId ? handleSavePayRates : undefined}
+                onLoadEmployeeRateOverrides={isSupabaseConfigured && orgId ? handleLoadEmployeeRateOverrides : undefined}
+                onUpsertEmployeeRateOverride={isSupabaseConfigured && orgId ? handleUpsertEmployeeRateOverride : undefined}
+                onDeleteEmployeeRateOverride={isSupabaseConfigured && orgId ? handleDeleteEmployeeRateOverride : undefined}
+              />
             )}
             {currentView === 'COTIZADOR' && (
               <Cotizador 
                 initialData={quoteInitialData} 
+                syncVersion={0}
+                onListQuotes={isSupabaseConfigured && orgId ? handleListQuotes : undefined}
+                onUpsertQuote={isSupabaseConfigured && orgId ? handleUpsertQuote : undefined}
+                onDeleteQuote={isSupabaseConfigured && orgId ? handleDeleteQuote : undefined}
               />
             )}
           </div>
