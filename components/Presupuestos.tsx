@@ -1051,7 +1051,9 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
         materials: cloneMaterials(nextItem.materials as any)
         };
 
-        // Auto-fill from locally downloaded library (offline-first).
+        // Auto-fill desde catálogo: primero biblioteca local (offline), luego Supabase (APUs) si está disponible.
+        let usedOffline = false;
+
         try {
           const offline = await suggestLineFromOfflineCatalog({ typology: String(typology), lineName: newLine.name });
           if (offline) {
@@ -1061,9 +1063,26 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
             if (Array.isArray((offline as any).materials)) {
               newLine.materials = cloneMaterials(((offline as any).materials as MaterialItem[]));
             }
+            usedOffline = true;
           }
         } catch {
-          // ignore
+          // ignore errores de biblioteca local
+        }
+
+        if (!usedOffline && onSuggestLineFromCatalog) {
+          try {
+            const cloud = await onSuggestLineFromCatalog(String(typology), newLine.name);
+            if (cloud) {
+              newLine.unit = String((cloud as any).unit ?? newLine.unit);
+              newLine.laborCost = Number((cloud as any).laborCost ?? newLine.laborCost ?? 0);
+              newLine.equipmentCost = Number((cloud as any).equipmentCost ?? newLine.equipmentCost ?? 0);
+              if (Array.isArray((cloud as any).materials)) {
+                newLine.materials = cloneMaterials(((cloud as any).materials as MaterialItem[]));
+              }
+            }
+          } catch {
+            // ignore errores de Supabase por renglón; se mantiene el template base
+          }
         }
 
         newLine.directCost = calculateLineTotal(newLine);
