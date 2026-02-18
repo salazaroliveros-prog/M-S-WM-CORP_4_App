@@ -293,8 +293,8 @@ const Dashboard: React.FC<Props> = ({ projects, useCloud = false, orgId = null }
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
          <div className="bg-white p-6 rounded-xl shadow">
             <h3 className="font-bold text-gray-700 mb-4">Flujo de Caja (6 meses)</h3>
-          <div className="h-64 min-w-0">
-              <ResponsiveContainer width="100%" height="100%">
+            <div className="h-64 min-w-0">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                 <LineChart data={lineData}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="name" />
@@ -309,8 +309,8 @@ const Dashboard: React.FC<Props> = ({ projects, useCloud = false, orgId = null }
 
          <div className="bg-white p-6 rounded-xl shadow">
           <h3 className="font-bold text-gray-700 mb-4">Distribución por Tipología</h3>
-        <div className="h-64 min-w-0">
-              <ResponsiveContainer width="100%" height="100%">
+          <div className="h-64 min-w-0">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                 <PieChart>
                   <Pie
                     data={pieData}

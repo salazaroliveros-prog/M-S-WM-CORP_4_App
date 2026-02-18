@@ -1174,7 +1174,7 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
             <div className="bg-white p-4 rounded-lg border border-gray-200">
               <div className="font-bold text-gray-700 mb-2">Ingresos vs Gastos (6 meses, global)</div>
               <div className="h-64" ref={globalLineWrapRef}>
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                   <LineChart data={globalMetrics.lineData}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis
@@ -1199,7 +1199,7 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
             <div className="bg-white p-4 rounded-lg border border-gray-200">
               <div className="font-bold text-gray-700 mb-2">¿En qué se gasta? (global)</div>
               <div className="h-64" ref={globalPieWrapRef}>
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                   <PieChart>
                     <Pie
                       data={globalMetrics.expensePie}
@@ -1375,7 +1375,7 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
             <div className="bg-white p-4 rounded-xl shadow border border-gray-200">
               <div className="font-bold text-gray-700 mb-2">Ingresos vs Gastos (6 meses, proyecto)</div>
               <div className="h-64" ref={projectLineWrapRef}>
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                   <LineChart data={selectedProjectMetrics?.lineData ?? []}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis
@@ -1400,7 +1400,7 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
             <div className="bg-white p-4 rounded-xl shadow border border-gray-200">
               <div className="font-bold text-gray-700 mb-2">¿En qué se gasta? (proyecto)</div>
               <div className="h-64" ref={projectPieWrapRef}>
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                   <PieChart>
                     <Pie
                       data={selectedProjectMetrics?.expensePie ?? [{ name: 'Sin gastos', value: 1 }]}
@@ -1456,7 +1456,7 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
           <div className="p-4 border-b border-gray-200">
             <div className="font-bold text-gray-700 mb-2">Planificado vs Ejecutado (cantidades, top renglones)</div>
             <div className="h-72" ref={topBarsWrapRef}>
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                 <BarChart
                   data={(() => {
                     const rows = progressLines
