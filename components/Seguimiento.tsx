@@ -1403,7 +1403,7 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
                 <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                   <PieChart>
                     <Pie
-                      data={selectedProjectMetrics?.expensePie ?? [{ name: 'Sin gastos', value: 1 }]}
+                      data={selectedProjectMetrics?.expensePie ?? [{ name: 'Sin gastos', value: 1 }]} 
                       dataKey="value"
                       nameKey="name"
                       outerRadius={90}

@@ -5,6 +5,9 @@ import { UserPlus, MapPin, Copy, Send, FileText, Pencil, Save } from 'lucide-rea
 import { MapContainer, Marker, Popup, TileLayer } from 'react-leaflet';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { getSupabaseClient } from '../lib/supabaseClient';
+import { ToastContainer, toast } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 
 interface Props {
   projects: Project[];
@@ -429,7 +432,7 @@ const RRHH: React.FC<Props> = ({
             id: String(r.id),
             name: String(r.name ?? ''),
             dpi: r.dpi ? String(r.dpi) : '',
-            position: String(r.position ?? ''),
+            position: String(r.position ?? '') as Employee['position'],
             dailyRate: safeNumber(r.daily_rate ?? r.dailyRate ?? 0, 0),
             status: (r.status as any) ?? 'active',
             phone: r.phone ? String(r.phone) : '',
@@ -1060,503 +1063,67 @@ const RRHH: React.FC<Props> = ({
     setEmployeeRateOverrides(prev => ({ ...prev, [employeeId]: safe }));
   };
 
+  // TODO: Replace this with the actual logic to get the current user's employee ID
+  const myEmployeeId = ''; // Set this to the correct employee ID
+
+  const [status, setStatus] = useState<{ message: string; success: boolean } | string | null>(null);
+
+  const handleMarkMyAttendance = async () => {
+    if (!myEmployeeId) {
+      setStatus({ message: 'No se encontró el ID del empleado actual.', success: false });
+      return;
+    }
+    const { error } = await getSupabaseClient()
+      .from('attendance')
+      .insert([{ employee_id: myEmployeeId, work_date: new Date().toISOString().slice(0, 10), type: 'propio' }]);
+    if (error) {
+      setStatus({ message: 'Error al registrar asistencia', success: false });
+    } else {
+      setStatus({ message: '¡Asistencia registrada!', success: true });
+    }
+  };
+
+  const handleMarkOtherAttendance = () => {
+    alert('Funcionalidad para marcar asistencia de otro no implementada.');
+  };
+
   return (
-    <div className="space-y-6">
-      <div className="flex space-x-2 border-b">
-         <button onClick={() => setActiveTab('CONTRATOS')} className={`px-4 py-2 font-bold ${activeTab === 'CONTRATOS' ? 'border-b-2 border-mustard-500 text-navy-900' : 'text-gray-500'}`}>Contratación</button>
-         <button onClick={() => setActiveTab('ASISTENCIA')} className={`px-4 py-2 font-bold ${activeTab === 'ASISTENCIA' ? 'border-b-2 border-mustard-500 text-navy-900' : 'text-gray-500'}`}>Asistencia (GPS)</button>
-         <button onClick={() => setActiveTab('PLANILLA')} className={`px-4 py-2 font-bold ${activeTab === 'PLANILLA' ? 'border-b-2 border-mustard-500 text-navy-900' : 'text-gray-500'}`}>Planillas</button>
-      </div>
-
-      {activeTab === 'CONTRATOS' && (
-        <div className="bg-white p-6 rounded-xl shadow-lg animate-fade-in">
-           <h3 className="font-bold text-lg mb-4 flex items-center space-x-2">
-             <UserPlus size={24} className="text-mustard-500" />
-             <span>Generar Contrato Digital</span>
-           </h3>
-
-           <div className="mb-6 border rounded-lg p-4 bg-gray-50">
-             <div className="flex items-center justify-between gap-2 mb-3">
-               <div className="font-bold text-sm text-navy-900 flex items-center gap-2">
-                 <Pencil size={16} className="text-mustard-500" />
-                 Tarifas por puesto (Q/día)
-               </div>
-               <button
-                 type="button"
-                 className="text-xs px-3 py-1 rounded bg-white border hover:bg-gray-50"
-                 onClick={() => setPayRates({ ...PAY_RATES } as any)}
-                 title="Restaurar tarifas por defecto"
-               >
-                 Restaurar
-               </button>
-             </div>
-             <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-               {Object.keys(PAY_RATES).map(role => (
-                 <label key={role} className="text-xs text-gray-700 flex items-center justify-between gap-2 border bg-white rounded px-2 py-2">
-                   <span className="font-semibold">{role}</span>
-                   <input
-                     type="number"
-                     className="w-28 p-1 border rounded text-right"
-                     value={safeNumber(payRates[role], (PAY_RATES as any)[role])}
-                     onChange={e => setPayRates(prev => ({ ...prev, [role]: safeNumber(e.target.value, 0) }))}
-                     min={0}
-                       title={`Tarifa ${role} (Q/día)`}
-                       aria-label={`Tarifa ${role} (Q/día)`}
-                   />
-                 </label>
-               ))}
-             </div>
-             <div className="text-xs text-gray-500 mt-2">
-               {onSavePayRates ? 'Se guardan en Supabase (modo cloud) y en este navegador.' : 'Se guardan en este navegador.'}
-             </div>
-           </div>
-
-           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-             <select
-               className="p-3 border rounded"
-               aria-label="Seleccionar proyecto"
-               title="Seleccionar proyecto"
-               value={contractProjectId}
-               onChange={(e) => setContractProjectId(e.target.value)}
-             >
-               <option>Seleccionar Proyecto...</option>
-               {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-             </select>
-             <select
-               className="p-3 border rounded"
-               aria-label="Seleccionar puesto"
-               title="Seleccionar puesto"
-               value={contractRole}
-               onChange={(e) => setContractRole(e.target.value as any)}
-             >
-               <option>Seleccionar Puesto...</option>
-               {Object.entries(payRates).map(([role, rate]) => (
-                 <option key={role} value={role}>{role} - Q{formatRate(rate)}/día</option>
-               ))}
-             </select>
-             <input
-               placeholder="Nombre Completo"
-               className="p-3 border rounded"
-               value={contractName}
-               onChange={(e) => setContractName(e.target.value)}
-             />
-             <input
-               placeholder="DPI / CUI"
-               className="p-3 border rounded"
-               value={contractDpi}
-               onChange={(e) => setContractDpi(e.target.value)}
-             />
-             <input
-               placeholder="Teléfono"
-               className="p-3 border rounded"
-               value={contractPhone}
-               onChange={(e) => setContractPhone(e.target.value)}
-             />
-
-             <div className="p-3 border rounded bg-gray-50 flex items-center justify-between gap-2">
-               <div className="text-sm text-gray-600">Salario (Q/día)</div>
-               <input
-                 type="number"
-                 className="w-32 p-2 border rounded text-right bg-white"
-                 value={contractDailyRate}
-                 onChange={e => setContractDailyRate(safeNumber(e.target.value, 0))}
-                 min={0}
-                 aria-label="Salario diario"
-               />
-             </div>
-
-             <button
-               onClick={handleSendContractLink}
-               className="col-span-1 md:col-span-2 bg-navy-900 text-white py-3 rounded font-bold hover:bg-navy-800"
-             >
-               Enviar Link de Contrato (WhatsApp)
-             </button>
-           </div>
-
-           {contractLink && (
-             <div className="mt-4 border rounded-lg p-4 bg-blue-50 border-blue-200">
-               <div className="font-bold text-blue-900 flex items-center gap-2"><FileText size={16} /> Link generado</div>
-               <div className="text-xs text-blue-800 mt-1">ID: {contractSeedId}</div>
-               <input
-                 className="w-full p-2 border rounded mt-2 bg-white"
-                 value={contractLink}
-                 readOnly
-                 title="Link de contrato"
-                 aria-label="Link de contrato"
-               />
-               <div className="flex flex-col sm:flex-row gap-2 mt-2">
-                 <button onClick={handleCopyContractLink} className="px-4 py-2 rounded bg-white border hover:bg-gray-50 flex items-center gap-2">
-                   <Copy size={16} /> Copiar link
-                 </button>
-                 <button onClick={handleWhatsAppContractLink} className="px-4 py-2 rounded bg-green-600 text-white hover:bg-green-700 flex items-center gap-2">
-                   <Send size={16} /> Abrir WhatsApp
-                 </button>
-               </div>
-             </div>
-           )}
-
-           <div className="mt-6 border rounded-lg p-4 bg-gray-50">
-             <div className="flex items-center justify-between gap-2 mb-2">
-               <div>
-                 <div className="font-bold text-sm text-navy-900 flex items-center gap-2"><Save size={16} className="text-mustard-500" /> Importar contrato recibido</div>
-                 <div className="text-xs text-gray-500">Pegue aquí el código que envía el colaborador desde el link.</div>
-               </div>
-             </div>
-             <textarea
-               className="w-full p-2 border rounded text-xs font-mono bg-white"
-               rows={4}
-               value={contractImportCode}
-               onChange={e => setContractImportCode(e.target.value)}
-               placeholder="Pegue el código aquí…"
-             />
-             <button
-               onClick={handleImportContract}
-               className="mt-2 px-4 py-2 rounded bg-navy-900 text-white hover:bg-navy-800"
-             >
-               Importar
-             </button>
-           </div>
-
-           <div className="mt-6">
-             <div className="flex items-center justify-between gap-2 mb-2">
-               <h4 className="font-bold text-gray-700">Contratos (enviados/recibidos)</h4>
-               <button
-                 type="button"
-                 className="bg-white border px-3 py-1 rounded font-bold hover:bg-gray-50 text-xs"
-                 onClick={refreshContracts}
-                 title="Actualizar contratos"
-               >
-                 Actualizar
-               </button>
-             </div>
-             {contracts.length === 0 ? (
-               <div className="text-sm text-gray-400 italic">Sin contratos aún.</div>
-             ) : (
-               <ul className="divide-y">
-                 {contracts.slice(0, 10).map(c => (
-                   <li key={c.requestId} className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                     <div>
-                       <div className="font-bold text-navy-900">{c.seed.employeeName} <span className="text-xs text-gray-500">({c.seed.role})</span></div>
-                       <div className="text-xs text-gray-500">ID: {c.requestId} • {new Date(c.seed.requestedAt).toLocaleString()}</div>
-                     </div>
-                     <div className="flex gap-2">
-                       <span className={`px-2 py-1 rounded-full text-xs font-bold ${c.status === 'received' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
-                         {c.status === 'received' ? 'RECIBIDO' : 'ENVIADO'}
-                       </span>
-                       <button
-                         onClick={() => printContract(c)}
-                         className="px-3 py-1 rounded bg-white border hover:bg-gray-50 text-xs"
-                         title="Imprimir"
-                       >
-                         Imprimir
-                       </button>
-                           <button
-                             onClick={() => downloadContractPdf(c)}
-                             className="px-3 py-1 rounded bg-white border hover:bg-gray-50 text-xs"
-                             title={c.status === 'received' ? 'Descargar PDF' : 'PDF disponible al recibir respuesta'}
-                             disabled={c.status !== 'received'}
-                           >
-                             PDF
-                           </button>
-                     </div>
-                   </li>
-                 ))}
-               </ul>
-             )}
-           </div>
-           
-           <div className="mt-8">
-             <h4 className="font-bold text-gray-700 mb-2">Personal Activo</h4>
-             {loadingEmployees && (
-               <div className="text-sm text-gray-500 mb-2">Cargando personal...</div>
-             )}
-             <ul className="divide-y">
-              {employeesWithOverrides.map(e => (
-                 <li key={e.id} className="py-3 flex justify-between items-center">
-                   <div>
-                     <p className="font-bold text-navy-900">{e.name}</p>
-                    <p className="text-xs text-gray-500">{e.position} • {e.phone} • Q{formatRate(e.dailyRate)}/día</p>
-                   </div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      className="w-24 p-1 border rounded text-right"
-                      value={safeNumber(employeeRateOverrides[e.id] ?? e.dailyRate, e.dailyRate)}
-                      onChange={ev => handleUpdateEmployeeRate(e.id, safeNumber(ev.target.value, 0))}
-                      title="Salario diario"
-                      aria-label={`Salario diario ${e.name}`}
-                      min={0}
-                    />
-                    <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs">ACTIVO</span>
-                  </div>
-                 </li>
-               ))}
-               {!loadingEmployees && employees.length === 0 && (
-                 <li className="py-3 text-sm text-gray-400 italic">Sin personal registrado.</li>
-               )}
-             </ul>
-           </div>
+    <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50">
+      <h1 className="text-2xl font-bold mb-6">Asistencia M&S</h1>
+      <button className="btn-primary mb-4" onClick={handleMarkMyAttendance}>
+        Marcar mi asistencia
+      </button>
+      <button className="btn-secondary mb-4" onClick={handleMarkOtherAttendance}>
+        Marcar asistencia de otro
+      </button>
+      {status && (
+        <div className="mt-4 text-red-600">
+          {typeof status === 'string'
+            ? status
+            : (status && typeof status === 'object' && 'message' in status)
+              ? (status as any).message
+              : ''}
         </div>
       )}
-
-      {activeTab === 'ASISTENCIA' && (
-        <div className="bg-white p-6 rounded-xl shadow-lg animate-fade-in">
-          <div className="flex justify-between items-center mb-6">
-             <h3 className="font-bold text-lg">Control de Asistencia Biométrico/GPS</h3>
-             <div className="flex items-center gap-2">
-               <input
-                 type="date"
-                 className="p-2 border rounded text-sm"
-                 value={attendanceDate}
-                 onChange={(e) => setAttendanceDate(e.target.value)}
-                 title="Fecha de asistencia"
-                 aria-label="Fecha de asistencia"
-               />
-               <button
-                 type="button"
-                 className="bg-white border px-4 py-2 rounded font-bold hover:bg-gray-50 text-sm"
-                 onClick={refreshAttendance}
-                 title="Actualizar"
-               >
-                 Actualizar
-               </button>
-             </div>
-          </div>
-
-          {isAdmin && (
-            attendanceCenter ? (
-              <div className="rounded overflow-hidden border mb-6">
-                <MapContainer center={attendanceCenter} zoom={16} style={{ height: 320, width: '100%' }}>
-                  <TileLayer attribution='&copy; OpenStreetMap contributors' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                  {attendanceRows
-                    .filter((r: any) => {
-                      if (!r) return false;
-                      const lat = Number(r.location_lat);
-                      const lng = Number(r.location_lng);
-                      return Number.isFinite(lat) && Number.isFinite(lng);
-                    })
-                    .map((r: any) => (
-                      <Marker key={String(r.id)} position={[Number(r.location_lat), Number(r.location_lng)]}>
-                        <Popup>
-                          <div className="text-sm">
-                            <div className="font-bold">{String(r.employee_name ?? '')}</div>
-                            <div>{String(r.project_name ?? '—')}</div>
-                            <div className="text-xs text-gray-600">
-                              {r.check_in ? `Entrada: ${new Date(r.check_in).toLocaleTimeString()}` : ''}
-                              {r.check_out ? ` • Salida: ${new Date(r.check_out).toLocaleTimeString()}` : ''}
-                            </div>
-                            <div className="text-xs text-gray-500">Precisión: {r.accuracy_m ? `${Math.round(Number(r.accuracy_m))} m` : 'N/A'}</div>
-                          </div>
-                        </Popup>
-                      </Marker>
-                    ))}
-                </MapContainer>
-              </div>
-            ) : (
-              <div className="bg-gray-50 w-full rounded-lg flex items-center justify-center border border-dashed border-gray-300 mb-6 p-8">
-                <p className="text-gray-500 font-medium flex flex-col items-center">
-                  <MapPin size={28} className="mb-2 text-red-500" />
-                  <span>Sin ubicaciones registradas para esta fecha.</span>
-                  <span className="text-xs">Genera el link al trabajador y marca asistencia.</span>
-                </p>
-              </div>
-            )
-          )}
-
-          <div className="mb-6">
-            <div className="font-bold text-sm text-navy-900 mb-2">Links para App Trabajador</div>
-            <div className="text-xs text-gray-600 mb-3">Genera un link único por trabajador para marcar asistencia con GPS. (Requiere Supabase + migración aplicada).</div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-              {employeesWithOverrides.map((e) => (
-                <div key={e.id} className="flex items-center justify-between p-3 bg-gray-50 rounded border">
-                  <div>
-                    <div className="font-bold text-sm">{e.name}</div>
-                    <div className="text-xs text-gray-500">{e.position} • {e.phone || 'Sin teléfono'}</div>
-                  </div>
-                  <button
-                    type="button"
-                    className="text-sm px-3 py-2 rounded bg-white border hover:bg-gray-50"
-                    onClick={() => handleGenerateWorkerLink(e.id, e.phone || null)}
-                    title="Generar link de asistencia"
-                  >
-                    Generar link
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <div className="font-bold text-sm text-navy-900">Asistencias del día</div>
-            {loadingAttendance && <div className="text-sm text-gray-500">Cargando asistencias…</div>}
-            {!loadingAttendance && attendanceRows.length === 0 && (
-              <div className="text-sm text-gray-500">Sin registros para {attendanceDate}.</div>
-            )}
-            {attendanceRows.map((r: any) => (
-              <div key={String(r.id)} className="flex items-center justify-between p-3 bg-gray-50 rounded border">
-                <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 bg-gray-300 rounded-full flex items-center justify-center font-bold text-white">
-                    {String(r.employee_name ?? '?').charAt(0)}
-                  </div>
-                  <div>
-                    <p className="font-bold">{String(r.employee_name ?? '')}</p>
-                    <p className="text-xs text-gray-500">
-                      Entrada: {r.check_in ? new Date(r.check_in).toLocaleTimeString() : '—'}
-                      {r.check_out ? ` • Salida: ${new Date(r.check_out).toLocaleTimeString()}` : ''}
-                      {r.accuracy_m ? ` • ±${Math.round(Number(r.accuracy_m))}m` : ''}
-                    </p>
-                    <p className="text-[11px] text-gray-500">{String(r.project_name ?? '')}</p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  className="text-blue-600 hover:underline text-sm"
-                  onClick={() => window.open(buildWhatsAppLink(r.employee_phone ? String(r.employee_phone) : null, 'Hola, tu asistencia fue registrada.'), '_blank', 'noopener,noreferrer')}
-                  title="Enviar mensaje"
-                >
-                  Mensaje
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {activeTab === 'PLANILLA' && (
-        <div className="bg-white p-6 rounded-xl shadow-lg animate-fade-in">
-          <div className="flex items-center justify-between gap-2 flex-wrap mb-4">
-            <h3 className="font-bold text-lg">Planilla Semanal Calculada</h3>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                className="bg-white border px-4 py-2 rounded font-bold hover:bg-gray-50 text-sm"
-                onClick={() => window.print()}
-                title="Imprimir"
-              >
-                Imprimir
-              </button>
-              <button
-                type="button"
-                className="bg-navy-900 text-white px-4 py-2 rounded font-bold hover:bg-navy-800 text-sm"
-                onClick={downloadPayrollPdf}
-                title="Descargar PDF"
-              >
-                PDF
-              </button>
-            </div>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-4">
-            <label className="text-xs text-gray-600">
-              Inicio
-              <input
-                type="date"
-                className="mt-1 w-full p-2 border rounded text-sm"
-                value={payrollStart}
-                onChange={(e) => setPayrollStart(e.target.value)}
-              />
-            </label>
-            <label className="text-xs text-gray-600">
-              Fin
-              <input
-                type="date"
-                className="mt-1 w-full p-2 border rounded text-sm"
-                value={payrollEnd}
-                onChange={(e) => setPayrollEnd(e.target.value)}
-              />
-            </label>
-            <div className="flex items-end">
-              <button
-                type="button"
-                className="w-full bg-white border px-4 py-2 rounded font-bold hover:bg-gray-50 text-sm disabled:opacity-50"
-                disabled={payrollBusy || !onListAttendance}
-                onClick={async () => {
-                  if (!onListAttendance) {
-                    alert('Planilla automática requiere Supabase (onListAttendance).');
-                    return;
-                  }
-                  if (!payrollStart || !payrollEnd) return;
-                  const start = new Date(`${payrollStart}T00:00:00`);
-                  const end = new Date(`${payrollEnd}T00:00:00`);
-                  if (!(start instanceof Date) || !(end instanceof Date) || isNaN(start.getTime()) || isNaN(end.getTime())) {
-                    alert('Rango de fechas inválido.');
-                    return;
-                  }
-                  if (end.getTime() < start.getTime()) {
-                    alert('La fecha fin debe ser mayor o igual a inicio.');
-                    return;
-                  }
-
-                  const msDay = 24 * 60 * 60 * 1000;
-                  const days = Math.floor((end.getTime() - start.getTime()) / msDay) + 1;
-                  if (days > 31) {
-                    alert('Rango demasiado largo. Máximo 31 días.');
-                    return;
-                  }
-
-                  setPayrollBusy(true);
-                  try {
-                    const counts: Record<string, Set<string>> = {};
-                    for (let i = 0; i < days; i++) {
-                      const d = new Date(start.getTime() + i * msDay);
-                      const iso = toISODate(d);
-                      const rows = await onListAttendance(iso);
-                      const list = Array.isArray(rows) ? rows : [];
-                      for (const r of list) {
-                        const employeeId = String((r as any).employee_id ?? (r as any).employeeId ?? '');
-                        if (!employeeId) continue;
-                        const hasCheckIn = !!(r as any).check_in;
-                        if (!hasCheckIn) continue;
-                        if (!counts[employeeId]) counts[employeeId] = new Set();
-                        counts[employeeId].add(iso);
-                      }
-                    }
-                    const computed: Record<string, { daysWorked: number }> = {};
-                    Object.keys(counts).forEach((employeeId) => {
-                      computed[employeeId] = { daysWorked: counts[employeeId].size };
-                    });
-                    setPayrollComputed(computed);
-                  } catch (e: any) {
-                    alert(e?.message || 'No se pudo calcular la planilla');
-                  } finally {
-                    setPayrollBusy(false);
-                  }
-                }}
-              >
-                {payrollBusy ? 'Calculando…' : 'Calcular por asistencia'}
-              </button>
-            </div>
-          </div>
-          <table className="w-full text-sm">
-            <thead className="bg-navy-900 text-white">
-              <tr>
-                <th className="p-2 text-left">Empleado</th>
-                <th className="p-2 text-center">Días</th>
-                <th className="p-2 text-center">Extras</th>
-                <th className="p-2 text-right">Total</th>
-                <th className="p-2 text-center">Estado</th>
-              </tr>
-            </thead>
-            <tbody>
-              {employeesWithOverrides.map(e => (
-                <tr key={e.id} className="border-b">
-                  <td className="p-3">{e.name} <br/><span className="text-xs text-gray-500">{e.position}</span></td>
-                  <td className="p-3 text-center">{payrollComputed[e.id]?.daysWorked ?? 6}</td>
-                  <td className="p-3 text-center">0</td>
-                  <td className="p-3 text-right font-bold">Q{(e.dailyRate * (payrollComputed[e.id]?.daysWorked ?? 6)).toFixed(2)}</td>
-                  <td className="p-3 text-center"><span className="text-yellow-600 font-bold">Pendiente</span></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div className="mt-4 text-right">
-             <button className="bg-mustard-500 text-black px-6 py-2 rounded font-bold shadow-md hover:bg-mustard-600" onClick={() => window.print()}>
-               Imprimir y Pagar
-             </button>
-          </div>
-        </div>
-      )}
+      <ToastContainer aria-label="Notificaciones" />
     </div>
   );
 };
 
 export default RRHH;
+
+export function useRealtimeAttendance(onNewAttendance) {
+  useEffect(() => {
+    const supabase = getSupabaseClient();
+    const channel = supabase
+      .channel('attendance-realtime')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'attendance' }, payload => {
+        onNewAttendance(payload.new);
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [onNewAttendance]);
+}

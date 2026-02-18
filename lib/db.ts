@@ -1,5 +1,6 @@
 import type { AuditLog, BudgetLine, MaterialItem, Project, Transaction } from '../types';
 import { getSupabaseClient } from './supabaseClient';
+import { notifyAttendance, markNotificationAsRead, fetchNotifications } from './notifications';
 
 export type DbMode = 'supabase' | 'local';
 
