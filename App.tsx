@@ -375,23 +375,18 @@ const App: React.FC = () => {
         return existing;
       } catch (e) {
         console.error('Error leyendo requisiciones locales', e);
-        return (
-          <div>
-            <main className="min-h-screen bg-gray-100">
-              <div className="flex flex-col min-h-screen">
-                {/* Global notifications panel, visible on all screens if orgId is set */}
-                {orgId && (
-                  <div style={{ position: 'fixed', top: 0, right: 0, zIndex: 1000, width: 350, maxHeight: '90vh', overflowY: 'auto', background: '#fff', boxShadow: '0 2px 8px rgba(0,0,0,0.15)', borderRadius: 8, margin: 12, padding: 12 }}>
-                    <Notifications orgId={orgId} />
-                  </div>
-                )}
-                <div className="flex-1">
-                  {/* ...existing code... */}
-                </div>
-              </div>
-            </main>
-          </div>
-        );
+        return [];
+      }
+    }
+    return await listRequisitions(orgId);
+  };
+
+  // Handler for updating requisition status
+  const handleUpdateRequisitionStatus = async (
+    requisitionId: string,
+    status: 'received' | 'draft' | 'sent' | 'confirmed' | 'cancelled'
+  ) => {
+    if (!isSupabaseConfigured || !orgId) return;
     await updateRequisitionStatus(orgId, requisitionId, status);
   };
 
