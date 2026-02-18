@@ -961,10 +961,11 @@ const App: React.FC = () => {
               />
             )}
           </div>
+
         </div>
       </main>
     </div>
   );
-};
+}
 
 export default App;
