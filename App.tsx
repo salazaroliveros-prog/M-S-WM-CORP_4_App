@@ -164,19 +164,6 @@ const App: React.FC = () => {
   // State to handle navigation from Proyectos to Cotizador with client data
   const [quoteInitialData, setQuoteInitialData] = useState<QuoteInitialData | null>(null);
   
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const metaEnv = ((import.meta as any).env ?? {}) as Record<string, any>;
-      console.log('Supabase env diag', {
-        VITE_SUPABASE_URL: metaEnv.VITE_SUPABASE_URL,
-        VITE_SUPABASE_ANON_KEY: metaEnv.VITE_SUPABASE_ANON_KEY,
-        VITE_SUPABASE_EMAIL: metaEnv.VITE_SUPABASE_EMAIL,
-        VITE_SUPABASE_PASSWORD: metaEnv.VITE_SUPABASE_PASSWORD,
-        VITE_ORG_NAME: metaEnv.VITE_ORG_NAME,
-      });
-    }
-  }, []);
-  
   // Initialize from LocalStorage
   useEffect(() => {
     if (!isSupabaseConfigured) {
@@ -671,12 +658,16 @@ const App: React.FC = () => {
       try {
         setCloudError(null);
         const metaEnv = ((import.meta as any).env ?? {}) as Record<string, any>;
-        const serviceEmail = metaEnv.VITE_SUPABASE_EMAIL as string | undefined;
+        // Preferimos VITE_SUPABASE_EMAIL, pero si viene vacío usamos VITE_ADMIN_EMAIL
+        const rawEmail = (metaEnv.VITE_SUPABASE_EMAIL || metaEnv.VITE_ADMIN_EMAIL) as
+          | string
+          | undefined;
+        const serviceEmail = rawEmail && String(rawEmail).trim() ? String(rawEmail).trim() : undefined;
         const servicePassword = metaEnv.VITE_SUPABASE_PASSWORD as string | undefined;
 
         if (!serviceEmail || !servicePassword) {
           const missing: string[] = [];
-          if (!serviceEmail) missing.push('VITE_SUPABASE_EMAIL');
+          if (!serviceEmail) missing.push('VITE_SUPABASE_EMAIL o VITE_ADMIN_EMAIL');
           if (!servicePassword) missing.push('VITE_SUPABASE_PASSWORD');
 
           const detail =
