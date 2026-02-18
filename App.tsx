@@ -662,8 +662,20 @@ const App: React.FC = () => {
         const servicePassword = metaEnv.VITE_SUPABASE_PASSWORD as string | undefined;
 
         if (!serviceEmail || !servicePassword) {
+          const missing: string[] = [];
+          if (!serviceEmail) missing.push('VITE_SUPABASE_EMAIL');
+          if (!servicePassword) missing.push('VITE_SUPABASE_PASSWORD');
+
+          const detail =
+            missing.length > 0
+              ? ` Faltan variables: ${missing.join(', ')} (revise Secrets de GitHub o .env.local).`
+              : '';
+
           // Sin credenciales de servicio: continuar solo en modo local y marcar claramente el estado.
-          setCloudError('Supabase configurado sin credenciales de servicio. La app funciona en modo local en este dispositivo.');
+          setCloudError(
+            'Supabase configurado sin credenciales de servicio. La app funciona en modo local en este dispositivo.' +
+              detail
+          );
           setOrgId(null);
           return;
         }
