@@ -1074,8 +1074,103 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [syncVersion, selectedProjectId]);
 
+  // --- Tabla interactiva de proyectos y stock de materiales ---
+  const [showStockTable, setShowStockTable] = useState(false);
+  const [stockMaterials, setStockMaterials] = useState<any[]>([]);
+
+  // Cargar materiales presupuestados y comprados para el proyecto seleccionado
+  useEffect(() => {
+    if (!selectedProjectId || !onLoadBudget) {
+      setStockMaterials([]);
+      return;
+    }
+    (async () => {
+      try {
+        const budget = await onLoadBudget(selectedProjectId);
+        const lines = budget?.lines || [];
+        // Agrupar materiales presupuestados
+        const presupMap = new Map();
+        for (const line of lines) {
+          for (const m of line.materials || []) {
+            const key = `${m.name}__${m.unit}`;
+            presupMap.set(key, (presupMap.get(key) || 0) + (Number(m.quantityPerUnit) * Number(line.quantity)));
+          }
+        }
+        // Simulación: materiales comprados = ejecutados (puedes reemplazar por consulta real de compras si tienes)
+        const compradosMap = new Map();
+        for (const m of execMaterials) {
+          const key = `${m.name}__${m.unit}`;
+          compradosMap.set(key, (compradosMap.get(key) || 0) + (Number(m.quantity) || 0));
+        }
+        // Unir ambos
+        const allKeys = new Set([...presupMap.keys(), ...compradosMap.keys()]);
+        const rows = Array.from(allKeys).map(key => {
+          const [name, unit] = key.split('__');
+          const presup = presupMap.get(key) || 0;
+          const comprado = compradosMap.get(key) || 0;
+          return {
+            name,
+            unit,
+            presup,
+            comprado,
+            restante: presup - comprado
+          };
+        });
+        setStockMaterials(rows);
+      } catch {
+        setStockMaterials([]);
+      }
+    })();
+  }, [selectedProjectId, execMaterials, onLoadBudget]);
+
   return (
     <div className="space-y-6">
+      {/* Tabla de proyectos y stock de materiales */}
+      <div className="bg-white p-4 rounded-xl shadow-md border border-gray-100">
+        <h3 className="font-bold text-lg mb-2 text-navy-900">Stock de Materiales por Proyecto</h3>
+        <div className="mb-2">
+          <label className="block text-sm font-medium text-gray-700 mb-1">Seleccionar Proyecto</label>
+          <select
+            className="w-full max-w-xs p-2 border rounded"
+            value={selectedProjectId}
+            onChange={e => { setSelectedProjectId(e.target.value); setShowStockTable(true); }}
+          >
+            <option value="">-- Seleccione un proyecto --</option>
+            {projects.map(p => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+        </div>
+        {showStockTable && selectedProjectId && stockMaterials.length > 0 && (
+          <div className="overflow-x-auto mt-4">
+            <table className="w-full text-sm text-left">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="p-2">Material</th>
+                  <th className="p-2">Unidad</th>
+                  <th className="p-2 text-right">Presupuestado</th>
+                  <th className="p-2 text-right">Comprado</th>
+                  <th className="p-2 text-right">Restante</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stockMaterials.map((row, i) => (
+                  <tr key={row.name + row.unit} className={row.restante < 0 ? 'bg-red-50' : ''}>
+                    <td className="p-2">{row.name}</td>
+                    <td className="p-2">{row.unit}</td>
+                    <td className="p-2 text-right">{row.presup.toFixed(2)}</td>
+                    <td className="p-2 text-right">{row.comprado.toFixed(2)}</td>
+                    <td className={`p-2 text-right font-bold ${row.restante < 0 ? 'text-red-600' : 'text-green-700'}`}>{row.restante.toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {showStockTable && selectedProjectId && stockMaterials.length === 0 && (
+          <div className="text-gray-500 mt-4">No hay materiales presupuestados para este proyecto.</div>
+        )}
+      </div>
       <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           <div className="flex flex-col sm:flex-row sm:items-center gap-3">

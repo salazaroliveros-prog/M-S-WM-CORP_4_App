@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Project, Typology, ViewState } from '../types';
 import { Plus, MapPin, Calendar, FileText, Trash2, CheckCircle, AlertTriangle, X, Filter, ArrowDownAZ, ArrowUpZA, ArrowRight, Search, Users, Calculator, Crosshair } from 'lucide-react';
 
@@ -28,6 +28,9 @@ interface ConfirmDialogState {
   isDestructive?: boolean;
 }
 
+
+import { isSupabaseConfigured, getSupabaseClient } from '../lib/supabaseClient';
+
 const Proyectos: React.FC<Props> = ({ projects, onCreateProject, onUpdateProject, onDeleteProject, onViewChange, onSelectProject, onQuoteProject, onSyncCloud, onMigrateLocalToCloud }) => {
   const [showForm, setShowForm] = useState(false);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
@@ -56,6 +59,68 @@ const Proyectos: React.FC<Props> = ({ projects, onCreateProject, onUpdateProject
     message: '',
     action: () => {},
   });
+
+  // --- Realtime integration ---
+  const [liveProjects, setLiveProjects] = useState<Project[] | null>(null);
+  const channelRef = useRef<any>(null);
+
+  // Get orgId from the first project (all projects in this view are for the same org)
+  const orgId = projects.length > 0 ? (projects[0] as any).orgId || (projects[0] as any).org_id : null;
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !orgId) {
+      setLiveProjects(null);
+      return;
+    }
+    const supabase = getSupabaseClient();
+    const channel = supabase
+      .channel(`projects:${orgId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'projects', filter: `org_id=eq.${orgId}` },
+        (payload: any) => {
+          setLiveProjects((prev) => {
+            let next = prev ? [...prev] : [...projects];
+            const eventType = String(payload?.eventType || payload?.event || '').toUpperCase();
+            if (eventType === 'DELETE') {
+              const deletedId = payload?.old?.id;
+              if (deletedId) {
+                next = next.filter((p) => p.id !== String(deletedId));
+              }
+            } else {
+              const row = payload?.new;
+              if (row && row.id) {
+                const idx = next.findIndex((p) => p.id === row.id);
+                if (idx >= 0) {
+                  next[idx] = { ...next[idx], ...row };
+                } else {
+                  next = [row, ...next];
+                }
+              }
+            }
+            return next;
+          });
+        }
+      )
+      .subscribe();
+    channelRef.current = channel;
+    // Initialize with current projects
+    setLiveProjects([...projects]);
+    return () => {
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgId, isSupabaseConfigured]);
+
+  // If projects prop changes (e.g., org switch), reset liveProjects
+  useEffect(() => {
+    if (!isSupabaseConfigured || !orgId) return;
+    setLiveProjects([...projects]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projects, orgId, isSupabaseConfigured]);
 
   const handleGetLocation = () => {
     if (navigator.geolocation) {
@@ -412,7 +477,7 @@ const Proyectos: React.FC<Props> = ({ projects, onCreateProject, onUpdateProject
   };
 
   // Logic for Filtering and Sorting
-  const filteredProjects = projects
+  const filteredProjects = (liveProjects ?? projects)
     .filter(p => {
       const matchesStatus = filterStatus === 'all' ? true : p.status === filterStatus;
       const searchLower = searchTerm.toLowerCase();

@@ -57,6 +57,8 @@ import Seguimiento from './components/Seguimiento';
 import Compras from './components/Compras';
 import RRHH from './components/RRHH';
 import Cotizador from './components/Cotizador';
+import WorkerAttendance from './components/WorkerAttendance';
+import ContractIntake from './components/ContractIntake';
 
 const LOCAL_PASSWORD_KEY = 'ms_local_admin_password_v1';
 const LOCAL_TRANSACTIONS_KEY = 'transactions';
@@ -148,6 +150,14 @@ const syncOfflineEmployees = async (targetOrgId: string) => {
 };
 
 const App: React.FC = () => {
+  const [hash, setHash] = useState<string>(() => (typeof window !== 'undefined' ? window.location.hash || '' : ''));
+
+  useEffect(() => {
+    const onHashChange = () => setHash(window.location.hash || '');
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentView, setCurrentView] = useState<ViewState>('WELCOME');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -723,6 +733,14 @@ const App: React.FC = () => {
     });
     setCurrentView('COTIZADOR');
   };
+
+  // Public hash-based sub-apps (installable PWA views)
+  if (/^#asistencia=/.test(hash)) {
+    return <WorkerAttendance />;
+  }
+  if (/^#contract-intake=/.test(hash)) {
+    return <ContractIntake />;
+  }
 
   if (!isAuthenticated) {
     return <WelcomeScreen onLogin={handleLogin} />;

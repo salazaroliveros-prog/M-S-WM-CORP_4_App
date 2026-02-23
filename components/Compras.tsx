@@ -1,4 +1,42 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
+import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabaseClient';
+  // --- Realtime integration ---
+  const channelRef = useRef<any>(null);
+  // Get orgId from the selected project (if any)
+  const orgId = (() => {
+    const project = projects.find((p) => p.id === selectedProjectId);
+    return project ? (project as any).orgId || (project as any).org_id : null;
+  })();
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !orgId || !onListRequisitions) {
+      return;
+    }
+    const supabase = getSupabaseClient();
+    const channel = supabase
+      .channel(`requisitions:${orgId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'requisitions', filter: `org_id=eq.${orgId}` },
+        async () => {
+          try {
+            const res = await onListRequisitions();
+            setHistory(res);
+          } catch {
+            // ignore
+          }
+        }
+      )
+      .subscribe();
+    channelRef.current = channel;
+    return () => {
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgId, isSupabaseConfigured, onListRequisitions]);
 import { BudgetLine, Project, RequisitionData, RequisitionItem } from '../types';
 import { ShoppingCart, Send, Plus, Trash2, ClipboardList, X } from 'lucide-react';
 
@@ -992,28 +1030,47 @@ const Compras: React.FC<Props> = ({
           </div>
           
           <ul className="space-y-2 text-sm">
-            {orderItems.map((item, idx) => (
-              <li key={idx} className="flex gap-2 items-center border-b pb-1">
-                <input 
-                  type="text" 
-                  className="flex-grow p-1 border rounded bg-white"
-                  value={item.name}
-                  onChange={e => handleUpdateName(idx, e.target.value)}
-                  placeholder="Nombre del material"
-                />
-                <input 
-                  type="number" 
-                  className="w-20 p-1 border rounded bg-white text-right"
-                  value={item.quantity}
-                  onChange={e => handleUpdateQuantity(idx, parseFloat(e.target.value))}
-                  placeholder="Cant"
-                />
-                <span className="text-gray-500 text-xs w-16 truncate" title={item.unit}>{item.unit}</span>
-                <button onClick={() => handleRemoveItem(idx)} className="text-red-400 hover:text-red-600" aria-label="Eliminar item" title="Eliminar item">
-                  <Trash2 size={16} />
-                </button>
-              </li>
-            ))}
+            {orderItems.map((item, idx) => {
+              // Buscar presupuesto para este material
+              const matKey = normalizeKey(item.name) + '__' + normalizeKey(item.unit);
+              const presup = derivedMaterials.find(m => m.key === matKey);
+              const presupQty = presup ? presup.budgetQty : 0;
+              // Calcular total pedido de este material (sumando todos los items con mismo key)
+              const totalPedido = orderItems.filter(it => normalizeKey(it.name) + '__' + normalizeKey(it.unit) === matKey).reduce((sum, it) => sum + (Number(it.quantity) || 0), 0);
+              const diff = presupQty - totalPedido;
+              const excedido = presupQty > 0 && totalPedido > presupQty;
+              return (
+                <li key={idx} className={`flex flex-wrap gap-2 items-center border-b pb-1 ${excedido ? 'bg-red-50' : ''}`}>
+                  <input 
+                    type="text" 
+                    className="flex-grow p-1 border rounded bg-white"
+                    value={item.name}
+                    onChange={e => handleUpdateName(idx, e.target.value)}
+                    placeholder="Nombre del material"
+                  />
+                  <input 
+                    type="number" 
+                    className="w-20 p-1 border rounded bg-white text-right"
+                    value={item.quantity}
+                    onChange={e => handleUpdateQuantity(idx, parseFloat(e.target.value))}
+                    placeholder="Cant"
+                  />
+                  <span className="text-gray-500 text-xs w-16 truncate" title={item.unit}>{item.unit}</span>
+                  {presup && (
+                    <span className="text-xs text-gray-700 w-32 text-right">
+                      Presup: <b>{formatQty(presupQty)}</b><br/>
+                      Pedido: <b>{formatQty(totalPedido)}</b><br/>
+                      <span className={excedido ? 'text-red-600 font-bold' : 'text-green-700'}>
+                        {excedido ? `Excedido: ${formatQty(Math.abs(diff))}` : `Restante: ${formatQty(diff)}`}
+                      </span>
+                    </span>
+                  )}
+                  <button onClick={() => handleRemoveItem(idx)} className="text-red-400 hover:text-red-600" aria-label="Eliminar item" title="Eliminar item">
+                    <Trash2 size={16} />
+                  </button>
+                </li>
+              );
+            })}
             {orderItems.length === 0 && (
               <li className="text-center text-gray-400 italic py-4">La lista de pedido está vacía.</li>
             )}

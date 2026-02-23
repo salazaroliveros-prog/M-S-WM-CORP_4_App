@@ -13,7 +13,12 @@ export type IntegrationContext = {
 
 export function isAnonDisabledError(e: any): boolean {
   const msg = String(e?.message || e);
-  return msg.toLowerCase().includes('anonymous sign-ins are disabled');
+  const lower = msg.toLowerCase();
+  return (
+    lower.includes('anonymous sign-ins are disabled') ||
+    lower.includes('signups not allowed for this instance') ||
+    lower.includes('signup is disabled')
+  );
 }
 
 export function isRateLimitError(e: any): boolean {

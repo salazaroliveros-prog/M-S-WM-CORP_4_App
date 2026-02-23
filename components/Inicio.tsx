@@ -71,7 +71,7 @@ const Inicio: React.FC<Props> = ({ projects, onViewChange, onCreateTransaction }
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 flex flex-col items-center w-full">
       {/* Banner */}
       <div className="bg-navy-900 rounded-xl p-8 text-center text-white relative overflow-hidden shadow-lg">
         <div className="relative z-10">
@@ -117,19 +117,19 @@ const Inicio: React.FC<Props> = ({ projects, onViewChange, onCreateTransaction }
       </div>
 
       {/* Form Area */}
-      <div className="bg-white p-6 rounded-xl shadow-md border border-gray-100 animate-fade-in">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="col-span-2">
+      <div className="bg-white p-6 rounded-xl shadow-md border border-gray-100 animate-fade-in w-full max-w-2xl mx-auto">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="sm:col-span-2">
              <label htmlFor="inicio-desc" className="block text-sm font-semibold text-gray-700">Descripción</label>
              <input id="inicio-desc" type="text" value={description} onChange={e => setDescription(e.target.value)} className="mt-1 w-full p-3 border rounded-lg" placeholder={activeTab === 'INGRESO' ? "Ej: Pago inicial cliente" : "Ej: Compra de cemento"} />
           </div>
 
-          <div>
+          <div className="w-full">
              <label htmlFor="inicio-amount" className="block text-sm font-semibold text-gray-700">Cantidad / Monto</label>
              <input id="inicio-amount" type="number" value={amount} onChange={e => setAmount(e.target.value)} className="mt-1 w-full p-3 border rounded-lg" placeholder="0" />
           </div>
 
-          <div>
+          <div className="w-full">
              <label htmlFor="inicio-unit" className="block text-sm font-semibold text-gray-700">Unidad</label>
              <select id="inicio-unit" value={unit} onChange={e => setUnit(e.target.value)} className="mt-1 w-full p-3 border rounded-lg">
                <option>Quetzal</option>
@@ -146,7 +146,7 @@ const Inicio: React.FC<Props> = ({ projects, onViewChange, onCreateTransaction }
              </select>
           </div>
 
-          <div>
+          <div className="w-full">
              <label htmlFor="inicio-category" className="block text-sm font-semibold text-gray-700">Categoría</label>
              <select id="inicio-category" value={category} onChange={e => setCategory(e.target.value)} className="mt-1 w-full p-3 border rounded-lg">
                <option value="">Seleccionar...</option>
@@ -170,12 +170,12 @@ const Inicio: React.FC<Props> = ({ projects, onViewChange, onCreateTransaction }
 
           {activeTab === 'GASTO' && (
             <>
-              <div>
-                 <label htmlFor="inicio-provider" className="block text-sm font-semibold text-gray-700">Proveedor</label>
-                 <input id="inicio-provider" type="text" value={provider} onChange={e => setProvider(e.target.value)} className="mt-1 w-full p-3 border rounded-lg" placeholder="Ej: Cemaco" />
+              <div className="w-full">
+                <label htmlFor="inicio-provider" className="block text-sm font-semibold text-gray-700">Proveedor</label>
+                <input id="inicio-provider" type="text" value={provider} onChange={e => setProvider(e.target.value)} className="mt-1 w-full p-3 border rounded-lg" placeholder="Ej: Cemaco" />
               </div>
               {provider && (
-                <div className="col-span-2 bg-yellow-50 p-4 rounded-lg border border-yellow-200">
+                <div className="sm:col-span-2 bg-yellow-50 p-4 rounded-lg border border-yellow-200 flex flex-col">
                   <label htmlFor="inicio-rent-end" className="block text-sm font-semibold text-yellow-800">Fecha Fin Alquiler (Opcional - Genera Alerta)</label>
                   <input id="inicio-rent-end" type="date" value={rentEnd} onChange={e => setRentEnd(e.target.value)} className="mt-1 w-full p-3 border rounded-lg" />
                 </div>
@@ -183,8 +183,8 @@ const Inicio: React.FC<Props> = ({ projects, onViewChange, onCreateTransaction }
             </>
           )}
 
-          <div className="col-span-2 pt-4">
-            <button onClick={handleSave} className="w-full bg-navy-900 text-white font-bold py-4 rounded-lg hover:bg-navy-800 transition-colors flex items-center justify-center space-x-2">
+          <div className="sm:col-span-2 pt-4">
+            <button onClick={handleSave} className="w-full bg-navy-900 text-white font-bold py-4 rounded-lg hover:bg-navy-800 transition-colors flex items-center justify-center space-x-2 text-base">
               <Save size={20} />
               <span>GUARDAR TRANSACCIÓN</span>
             </button>
@@ -193,7 +193,7 @@ const Inicio: React.FC<Props> = ({ projects, onViewChange, onCreateTransaction }
       </div>
 
       {/* Quick Navigation Footer */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4 w-full max-w-2xl mx-auto">
         <button onClick={() => onViewChange('PROYECTOS')} className="p-3 bg-gray-100 hover:bg-gray-200 rounded text-sm font-semibold text-gray-700">Ir a Proyectos</button>
         <button onClick={() => onViewChange('PRESUPUESTOS')} className="p-3 bg-gray-100 hover:bg-gray-200 rounded text-sm font-semibold text-gray-700">Ir a Presupuestos</button>
         <button onClick={() => onViewChange('DASHBOARD')} className="p-3 bg-gray-100 hover:bg-gray-200 rounded text-sm font-semibold text-gray-700">Ir a Dashboard</button>

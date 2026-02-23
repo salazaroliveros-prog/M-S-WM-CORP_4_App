@@ -58,12 +58,13 @@ describe('Supabase connectivity (integration)', () => {
     const signIn = await client.auth.signInAnonymously();
     if (signIn.error) {
       const msg = String(signIn.error.message || signIn.error);
-      if (msg.toLowerCase().includes('anonymous sign-ins are disabled')) {
+      const lower = msg.toLowerCase();
+      if (lower.includes('anonymous sign-ins are disabled') || lower.includes('signups not allowed for this instance') || lower.includes('signup is disabled')) {
         // eslint-disable-next-line no-console
         console.warn('Anonymous sign-ins are disabled in Supabase Auth; skipping anon-auth assertion.');
         return;
       }
-      if (msg.toLowerCase().includes('rate limit')) {
+      if (lower.includes('rate limit')) {
         // eslint-disable-next-line no-console
         console.warn('Supabase Auth rate limit reached; skipping anon-auth assertion.');
         return;

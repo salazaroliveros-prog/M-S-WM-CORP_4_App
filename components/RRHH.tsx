@@ -1,4 +1,198 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+/*
+          // Cálculo de pago semanal por minutos/horas trabajadas
+          function calcularPagoPorHoras(asis: any[], dailyRate: number): { dias: number, minutos: number, pago: number } {
+            let totalMin = 0;
+            let dias = 0;
+            asis.forEach(a => {
+              if (a.check_in && a.check_out) {
+                const inTime = new Date(`${a.work_date || a.date}T${a.check_in}`);
+                const outTime = new Date(`${a.work_date || a.date}T${a.check_out}`);
+                const min = (outTime.getTime() - inTime.getTime()) / 60000;
+                if (min > 0) {
+                  totalMin += min;
+                  dias += 1;
+                }
+              }
+            });
+            const pago = (totalMin / (8 * 60)) * dailyRate; // 8h jornada
+            return { dias, minutos: Math.round(totalMin), pago: Math.round(pago * 100) / 100 };
+          }
+        // Inactivación y reactivación automática de empleados
+        useEffect(() => {
+          // Si un empleado tiene 3 o más días de ausencia, marcar como inactivo
+          setEmployees(prev => prev.map(e => {
+            const att = attendanceRows.filter(a => a.employee_id === e.id);
+            if (!att.length) return { ...e, status: 'inactive' };
+            const last = att.reduce((max, a) => {
+              const d = new Date(a.work_date || a.date);
+              return d > max ? d : max;
+            }, new Date(0));
+            const diff = (new Date().getTime() - last.getTime()) / (1000 * 60 * 60 * 24);
+            if (diff >= 3) return { ...e, status: 'inactive' };
+            if (e.status === 'inactive' && diff < 3) return { ...e, status: 'active' };
+            return e;
+          }));
+        }, [attendanceRows]);
+        // UI para agregar, modificar y eliminar asistencias manualmente (solo admin)
+        const [editingAttendance, setEditingAttendance] = useState<any | null>(null);
+        const [newAttendance, setNewAttendance] = useState<any>({ employee_id: '', work_date: '', check_in: '', check_out: '', location_lat: '', location_lng: '' });
+        const handleSaveAttendance = async () => {
+          if (!newAttendance.employee_id || !newAttendance.work_date) return;
+          await getSupabaseClient().from('attendance').insert([{ ...newAttendance }]);
+          setNewAttendance({ employee_id: '', work_date: '', check_in: '', check_out: '', location_lat: '', location_lng: '' });
+          refreshAttendance();
+        };
+        const handleUpdateAttendance = async () => {
+          if (!editingAttendance || !editingAttendance.id) return;
+          await getSupabaseClient().from('attendance').update(editingAttendance).eq('id', editingAttendance.id);
+          setEditingAttendance(null);
+          refreshAttendance();
+        };
+        const handleDeleteAttendance = async (id: string) => {
+          await getSupabaseClient().from('attendance').delete().eq('id', id);
+          refreshAttendance();
+        };
+      // Descuento automático de tiempo fuera (refacción/almuerzo)
+      // Suponiendo que attendanceRows tiene check-in/check-out y location
+      // y que los horarios de refacción y almuerzo son fijos
+      const HORARIOS = {
+        refaccion: { inicio: '09:00', fin: '09:30' },
+        almuerzo: { inicio: '12:00', fin: '13:00' },
+      };
+      // Función para calcular minutos fuera de obra fuera de horario permitido
+      function calcularMinutosFuera(asis: any[]): number {
+        let total = 0;
+        asis.forEach(a => {
+          if (!a.check_in || !a.check_out) return;
+          const checkIn = new Date(a.check_in || a.checkIn);
+          const checkOut = new Date(a.check_out || a.checkOut);
+          // Si hay location y outside_allowed_radius, penalizar
+          if (a.outside_allowed_radius) {
+            const diff = (checkOut.getTime() - checkIn.getTime()) / 60000;
+            total += diff;
+          }
+          // Penalizar si sale fuera de obra en horario laboral (excepto refacción/almuerzo)
+          // (esto requiere que el registro de location esté disponible en cada check)
+          // Aquí solo ejemplo simple: penalizar si check-out es después del horario permitido
+          // (en la práctica, se debería trackear cada salida/entrada)
+        });
+        return Math.round(total);
+      }
+    // Alertas automáticas por asistencia (ausencias, fuera de radio, etc)
+    const [alerts, setAlerts] = useState<string[]>([]);
+    useEffect(() => {
+      if (!isAdmin) return;
+      const newAlerts: string[] = [];
+      // Ausencias >= 3 días
+      const now = new Date();
+      employees.forEach(e => {
+        const att = attendanceRows.filter(a => a.employee_id === e.id);
+        if (att.length === 0) {
+          newAlerts.push(`Empleado ${e.name} nunca ha registrado asistencia.`);
+          return;
+        }
+        const last = att.reduce((max, a) => {
+          const d = new Date(a.work_date || a.date);
+          return d > max ? d : max;
+        }, new Date(0));
+        const diff = (now.getTime() - last.getTime()) / (1000 * 60 * 60 * 24);
+        if (diff >= 3) newAlerts.push(`Empleado ${e.name} inactivo (ausente ${Math.floor(diff)} días)`);
+      });
+      // Asistencia fuera de radio
+      attendanceRows.forEach(a => {
+        if (a.outside_allowed_radius) {
+          const emp = employees.find(e => e.id === a.employee_id);
+          if (emp) newAlerts.push(`Asistencia fuera de radio: ${emp.name} (${a.work_date || a.date})`);
+        }
+      });
+      setAlerts(newAlerts);
+    }, [isAdmin, employees, attendanceRows]);
+  // Vacantes por puesto (ejemplo: configurable o por proyecto)
+  const VACANTES_POR_PUESTO: Record<string, number> = {
+    Supervisor: 1,
+    Encargado: 2,
+    'Maestro de obras': 2,
+    Albañil: 4,
+    Ayudante: 4,
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50">
+        <h1 className="text-2xl font-bold mb-6">Asistencia M&S</h1>
+        {isAdmin && alerts.length > 0 && (
+          <div className="mb-4 w-full">
+            {alerts.map((a, i) => (
+              <div key={i} className="bg-red-100 border border-red-300 text-red-700 rounded p-2 mb-2 text-sm font-semibold">
+                {a}
+              </div>
+            ))}
+          </div>
+        )}
+        <button className="btn-primary mb-4" onClick={handleMarkMyAttendance}>
+          Marcar mi asistencia
+        </button>
+        <button className="btn-secondary mb-4" onClick={handleMarkOtherAttendance}>
+          Marcar asistencia de otro
+        </button>
+        {isAdmin && (
+          <div className="w-full max-w-2xl bg-white rounded shadow p-4 my-6">
+            <h2 className="font-bold mb-2">Asistencias manuales</h2>
+            <div className="flex gap-2 mb-2">
+              <select value={newAttendance.employee_id} onChange={e => setNewAttendance(a => ({ ...a, employee_id: e.target.value }))} className="input input-bordered">
+                <option value="">Empleado</option>
+                {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+              </select>
+              <input type="date" value={newAttendance.work_date} onChange={e => setNewAttendance(a => ({ ...a, work_date: e.target.value }))} className="input input-bordered" />
+              <input type="time" value={newAttendance.check_in} onChange={e => setNewAttendance(a => ({ ...a, check_in: e.target.value }))} className="input input-bordered" placeholder="Check-in" />
+              <input type="time" value={newAttendance.check_out} onChange={e => setNewAttendance(a => ({ ...a, check_out: e.target.value }))} className="input input-bordered" placeholder="Check-out" />
+              <input type="number" step="any" value={newAttendance.location_lat} onChange={e => setNewAttendance(a => ({ ...a, location_lat: e.target.value }))} className="input input-bordered w-24" placeholder="Lat" />
+              <input type="number" step="any" value={newAttendance.location_lng} onChange={e => setNewAttendance(a => ({ ...a, location_lng: e.target.value }))} className="input input-bordered w-24" placeholder="Lng" />
+              <button className="btn-primary" onClick={handleSaveAttendance}>Agregar</button>
+            </div>
+            <table className="table-auto w-full text-xs">
+              <thead><tr><th>Empleado</th><th>Fecha</th><th>Check-in</th><th>Check-out</th><th>Lat</th><th>Lng</th><th></th></tr></thead>
+              <tbody>
+                {attendanceRows.map(a => (
+                  <tr key={a.id} className={editingAttendance && editingAttendance.id === a.id ? 'bg-yellow-100' : ''}>
+                    <td>{employees.find(e => e.id === a.employee_id)?.name || a.employee_id}</td>
+                    <td>{a.work_date || a.date}</td>
+                    <td>{a.check_in || a.checkIn || ''}</td>
+                    <td>{a.check_out || a.checkOut || ''}</td>
+                    <td>{a.location_lat || ''}</td>
+                    <td>{a.location_lng || ''}</td>
+                    <td>
+                      <button className="btn-secondary btn-xs mr-1" onClick={() => setEditingAttendance({ ...a })}>Editar</button>
+                      <button className="btn-error btn-xs" onClick={() => handleDeleteAttendance(a.id)}>Eliminar</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {editingAttendance && (
+              <div className="flex gap-2 mt-2">
+                <input type="time" value={editingAttendance.check_in || ''} onChange={e => setEditingAttendance(a => ({ ...a, check_in: e.target.value }))} className="input input-bordered" placeholder="Check-in" />
+                <input type="time" value={editingAttendance.check_out || ''} onChange={e => setEditingAttendance(a => ({ ...a, check_out: e.target.value }))} className="input input-bordered" placeholder="Check-out" />
+                <input type="number" step="any" value={editingAttendance.location_lat || ''} onChange={e => setEditingAttendance(a => ({ ...a, location_lat: e.target.value }))} className="input input-bordered w-24" placeholder="Lat" />
+                <input type="number" step="any" value={editingAttendance.location_lng || ''} onChange={e => setEditingAttendance(a => ({ ...a, location_lng: e.target.value }))} className="input input-bordered w-24" placeholder="Lng" />
+                <button className="btn-primary" onClick={handleUpdateAttendance}>Guardar</button>
+                <button className="btn-secondary" onClick={() => setEditingAttendance(null)}>Cancelar</button>
+              </div>
+            )}
+          </div>
+        )}
+        {status && (
+          <div className="mt-4 text-red-600">
+            {typeof status === 'string'
+              ? status
+              : (status && typeof status === 'object' && 'message' in status)
+                ? (status as any).message
+                : ''}
+          </div>
+        )}
+        <ToastContainer aria-label="Notificaciones" />
+      </div>
+    );
+*/
+
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Project, Employee } from '../types';
 import { PAY_RATES } from '../constants';
 import { UserPlus, MapPin, Copy, Send, FileText, Pencil, Save } from 'lucide-react';
@@ -49,7 +243,21 @@ type ContractResponse = ContractSeed & {
   emergencyContact: string;
   accepted: boolean;
   responseAt: string;
+  signatureUrl?: string; // firma digital (dataURL)
+  selfieUrl?: string;    // selfie (dataURL)
+  experienceYears?: number; // años de experiencia
+  references?: { company: string; type: string }[]; // referencias laborales
 };
+
+// Requisitos mínimos por puesto
+const minExperienceByRole: Record<string, number> = {
+    Supervisor: 4,
+    Encargado: 4,
+    'Maestro de obras': 4,
+    Albañil: 4,
+    Ayudante: 0,
+    Peón: 0,
+  };
 
 type ContractRecord = {
   requestId: string;
@@ -111,6 +319,53 @@ const safeNumber = (v: any, fallback = 0) => {
   const n = typeof v === 'number' ? v : Number(v);
   return Number.isFinite(n) ? n : fallback;
 };
+
+// Cálculo de pago semanal por minutos/horas trabajadas
+function calcularPagoPorHoras(asis: any[], dailyRate: number): { dias: number; minutos: number; pago: number } {
+  let totalMin = 0;
+  let dias = 0;
+  asis.forEach((a) => {
+    if (a?.check_in && a?.check_out) {
+      const inTime = new Date(`${a.work_date || a.date}T${a.check_in}`);
+      const outTime = new Date(`${a.work_date || a.date}T${a.check_out}`);
+      const min = (outTime.getTime() - inTime.getTime()) / 60000;
+      if (min > 0) {
+        totalMin += min;
+        dias += 1;
+      }
+    }
+  });
+  const pago = (totalMin / (8 * 60)) * dailyRate; // 8h jornada
+  return { dias, minutos: Math.round(totalMin), pago: Math.round(pago * 100) / 100 };
+}
+
+// Función para calcular minutos fuera de obra (penalizable)
+function calcularMinutosFuera(asis: any[]): number {
+  let total = 0;
+  asis.forEach((a) => {
+    if (!a?.check_in || !a?.check_out) return;
+
+    const workDate = String(a.work_date || a.date || '').slice(0, 10);
+    const toDateTime = (t: any) => {
+      const raw = String(t ?? '').trim();
+      if (!raw) return null;
+      if (raw.includes('T')) return new Date(raw);
+      if (/^\d{2}:\d{2}/.test(raw) && workDate) return new Date(`${workDate}T${raw}`);
+      return new Date(raw);
+    };
+
+    const checkIn = toDateTime(a.check_in || a.checkIn);
+    const checkOut = toDateTime(a.check_out || a.checkOut);
+    if (!checkIn || !checkOut) return;
+    if (!Number.isFinite(checkIn.getTime()) || !Number.isFinite(checkOut.getTime())) return;
+
+    if (a.outside_allowed_radius) {
+      const diff = (checkOut.getTime() - checkIn.getTime()) / 60000;
+      if (diff > 0) total += diff;
+    }
+  });
+  return Math.round(total);
+}
 
 const RRHH: React.FC<Props> = ({
   projects,
@@ -302,6 +557,13 @@ const RRHH: React.FC<Props> = ({
   const [attendanceRows, setAttendanceRows] = useState<any[]>([]);
   const [loadingAttendance, setLoadingAttendance] = useState(false);
 
+  const [payrollAttendanceRows, setPayrollAttendanceRows] = useState<any[]>([]);
+  const [loadingPayrollAttendance, setLoadingPayrollAttendance] = useState(false);
+
+  const [alerts, setAlerts] = useState<string[]>([]);
+  const [editingAttendance, setEditingAttendance] = useState<any | null>(null);
+  const [newAttendance, setNewAttendance] = useState<any>({ employee_id: '', work_date: '', check_in: '', check_out: '', location_lat: '', location_lng: '' });
+
   const [payrollStart, setPayrollStart] = useState<string>(() => {
     const d = new Date();
     d.setDate(d.getDate() - 6);
@@ -327,6 +589,34 @@ const RRHH: React.FC<Props> = ({
     }
   };
 
+  const refreshPayrollAttendance = useCallback(async () => {
+    if (!isAdmin) {
+      setPayrollAttendanceRows([]);
+      return;
+    }
+    if (!payrollStart || !payrollEnd) {
+      setPayrollAttendanceRows([]);
+      return;
+    }
+
+    setLoadingPayrollAttendance(true);
+    try {
+      const supabase = getSupabaseClient();
+      const { data, error } = await supabase
+        .from('attendance')
+        .select('*')
+        .gte('work_date', payrollStart)
+        .lte('work_date', payrollEnd);
+
+      if (error) throw error;
+      setPayrollAttendanceRows(Array.isArray(data) ? data : []);
+    } catch {
+      setPayrollAttendanceRows([]);
+    } finally {
+      setLoadingPayrollAttendance(false);
+    }
+  }, [isAdmin, payrollStart, payrollEnd]);
+
   const [contractProjectId, setContractProjectId] = useState('');
   const [contractRole, setContractRole] = useState<string>('');
   const [contractName, setContractName] = useState('');
@@ -345,6 +635,39 @@ const RRHH: React.FC<Props> = ({
   const [contractLink, setContractLink] = useState<string>('');
   const [contractSeedId, setContractSeedId] = useState<string>('');
   const [contractImportCode, setContractImportCode] = useState('');
+
+  // Experiencia y referencias para validación por puesto
+  const [experienceYears, setExperienceYears] = useState<number>(0);
+  const [references, setReferences] = useState<{ company: string; type: string }[]>([]);
+  const [referenceCompany, setReferenceCompany] = useState('');
+  const [referenceType, setReferenceType] = useState('');
+
+  const [signatureUrl, setSignatureUrl] = useState<string | null>(null);
+  const [selfieUrl, setSelfieUrl] = useState<string | null>(null);
+  const signatureCanvasRef = useRef<HTMLCanvasElement>(null);
+    // Funciones para firma digital
+    const clearSignature = () => {
+      const canvas = signatureCanvasRef.current;
+      if (canvas) {
+        const ctx = canvas.getContext('2d');
+        ctx?.clearRect(0, 0, canvas.width, canvas.height);
+        setSignatureUrl(null);
+      }
+    };
+    const saveSignature = () => {
+      const canvas = signatureCanvasRef.current;
+      if (canvas) {
+        setSignatureUrl(canvas.toDataURL('image/png'));
+      }
+    };
+    // Función para selfie
+    const handleSelfieChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = ev => setSelfieUrl(ev.target?.result as string);
+      reader.readAsDataURL(file);
+    };
   const [contracts, setContracts] = useState<ContractRecord[]>(() => {
     try {
       const raw = localStorage.getItem(STORAGE_CONTRACTS);
@@ -470,6 +793,74 @@ const RRHH: React.FC<Props> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, attendanceDate, onListAttendance, syncVersion]);
 
+  useEffect(() => {
+    if (activeTab !== 'PLANILLA') return;
+    refreshPayrollAttendance();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, payrollStart, payrollEnd, syncVersion]);
+
+  // Inactivación y reactivación automática de empleados
+  useEffect(() => {
+    setEmployees(prev => prev.map(e => {
+      const att = attendanceRows.filter(a => a.employee_id === e.id);
+      if (!att.length) return { ...e, status: 'inactive' };
+      const last = att.reduce((max, a) => {
+        const d = new Date(a.work_date || a.date);
+        return d > max ? d : max;
+      }, new Date(0));
+      const diff = (new Date().getTime() - last.getTime()) / (1000 * 60 * 60 * 24);
+      if (diff >= 3) return { ...e, status: 'inactive' };
+      if (e.status === 'inactive' && diff < 3) return { ...e, status: 'active' };
+      return e;
+    }));
+  }, [attendanceRows]);
+
+  // Alertas automáticas por asistencia (ausencias, fuera de radio, etc)
+  useEffect(() => {
+    if (!isAdmin) return;
+    const newAlerts: string[] = [];
+    const now = new Date();
+    employees.forEach(e => {
+      const att = attendanceRows.filter(a => a.employee_id === e.id);
+      if (att.length === 0) {
+        newAlerts.push(`Empleado ${e.name} nunca ha registrado asistencia.`);
+        return;
+      }
+      const last = att.reduce((max, a) => {
+        const d = new Date(a.work_date || a.date);
+        return d > max ? d : max;
+      }, new Date(0));
+      const diff = (now.getTime() - last.getTime()) / (1000 * 60 * 60 * 24);
+      if (diff >= 3) newAlerts.push(`Empleado ${e.name} inactivo (ausente ${Math.floor(diff)} días)`);
+    });
+    attendanceRows.forEach(a => {
+      if (a.outside_allowed_radius) {
+        const emp = employees.find(e => e.id === a.employee_id);
+        if (emp) newAlerts.push(`Asistencia fuera de radio: ${emp.name} (${a.work_date || a.date})`);
+      }
+    });
+    setAlerts(newAlerts);
+  }, [isAdmin, employees, attendanceRows]);
+
+  const handleSaveAttendance = async () => {
+    if (!newAttendance.employee_id || !newAttendance.work_date) return;
+    await getSupabaseClient().from('attendance').insert([{ ...newAttendance }]);
+    setNewAttendance({ employee_id: '', work_date: '', check_in: '', check_out: '', location_lat: '', location_lng: '' });
+    refreshAttendance();
+  };
+
+  const handleUpdateAttendance = async () => {
+    if (!editingAttendance || !editingAttendance.id) return;
+    await getSupabaseClient().from('attendance').update(editingAttendance).eq('id', editingAttendance.id);
+    setEditingAttendance(null);
+    refreshAttendance();
+  };
+
+  const handleDeleteAttendance = async (id: string) => {
+    await getSupabaseClient().from('attendance').delete().eq('id', id);
+    refreshAttendance();
+  };
+
   const attendanceCenter = useMemo(() => {
     if (!attendanceRows || attendanceRows.length === 0) return null as [number, number] | null;
     const r = attendanceRows.find((x: any) => {
@@ -527,6 +918,16 @@ const RRHH: React.FC<Props> = ({
       return { ...e, dailyRate: safeNumber(override, e.dailyRate) };
     });
   }, [employees, employeeRateOverrides]);
+
+  const acceptedEmployeeIds = useMemo(() => {
+    const set = new Set<string>();
+    contracts.forEach((c) => {
+      if (c?.status !== 'received') return;
+      const id = c?.seed?.employeeId ? String(c.seed.employeeId) : '';
+      if (id) set.add(id);
+    });
+    return set;
+  }, [contracts]);
 
   const selectedProject = useMemo(
     () => projects.find(p => p.id === contractProjectId) || null,
@@ -605,6 +1006,13 @@ const RRHH: React.FC<Props> = ({
       requireNonEmptyTrim(parsed?.phone, 'Teléfono');
       const startDate = requireNonEmptyTrim(parsed?.startDate, 'Fecha de inicio');
       if (!isLikelyIsoDateOnly(startDate)) throw new Error('Fecha de inicio inválida.');
+      // Validar firma y selfie
+      if (!signatureUrl) throw new Error('Debe capturar la firma digital del colaborador.');
+      if (!selfieUrl) throw new Error('Debe capturar la selfie del colaborador.');
+      // Validar experiencia y referencias
+      const minExp = minExperienceByRole[role] ?? 0;
+      if (experienceYears < minExp) throw new Error(`El puesto requiere al menos ${minExp} años de experiencia.`);
+      if (['Supervisor','Encargado','Maestro de obras','Albañil'].includes(role) && references.length < 2) throw new Error('Debe ingresar al menos 2 referencias laborales para este puesto.');
 
       const existing = contracts.find((c) => c.requestId === requestId) || null;
       if (existing?.seed) {
@@ -638,7 +1046,7 @@ const RRHH: React.FC<Props> = ({
           dailyRate: safeNumber(seedSource?.dailyRate ?? parsed.dailyRate, 0),
           projectName: seedSource?.projectName ?? resolvedProjectName,
         },
-        response: parsed,
+        response: { ...parsed, signatureUrl, selfieUrl, experienceYears, references },
       };
 
       setContracts(prev => {
@@ -811,17 +1219,23 @@ const RRHH: React.FC<Props> = ({
     });
 
     const rows = employeesWithOverrides.map((e) => {
-      const daysWorked = payrollComputed[e.id]?.daysWorked ?? 6;
       const dailyRate = safeNumber(employeeRateOverrides[e.id] ?? e.dailyRate, e.dailyRate);
-      const total = dailyRate * daysWorked;
+      const asis = payrollAttendanceRows.filter(a => a.employee_id === e.id);
+      const { dias, minutos, pago } = calcularPagoPorHoras(asis, dailyRate);
+      const minutosFuera = calcularMinutosFuera(asis);
+      const descuento = (minutosFuera / (8 * 60)) * dailyRate * dias;
+      const total = pago - descuento;
       const projectName = e.projectId ? (projectNameById.get(String(e.projectId)) ?? '') : '';
       return {
         employee: e.name,
         position: String(e.position ?? ''),
         projectName,
-        daysWorked,
+        daysWorked: dias,
         dailyRate,
         total,
+        descuento: Math.round(descuento * 100) / 100,
+        minutosFuera,
+        minutosTrabajados: minutos,
       };
     });
 
@@ -851,20 +1265,26 @@ const RRHH: React.FC<Props> = ({
       startY: y + 6,
       theme: 'grid',
       styles: { fontSize: 9, cellPadding: 5, overflow: 'linebreak' },
-      head: [['Empleado', 'Puesto', 'Proyecto/Obra', 'Días', 'Salario Día (Q)', 'Total (Q)', 'Observaciones']],
+      head: [['Empleado', 'Puesto', 'Proyecto/Obra', 'Días', 'Min. trabajados', 'Salario Día (Q)', 'Total (Q)', 'Descuento (Q)', 'Min. fuera', 'Observaciones']],
       body: rows.map((r) => [
         r.employee,
         r.position,
         r.projectName || '—',
         String(r.daysWorked),
+        r.minutosTrabajados || 0,
         (Math.round(r.dailyRate * 100) / 100).toFixed(2),
         (Math.round(r.total * 100) / 100).toFixed(2),
+        (Math.round((r.descuento || 0) * 100) / 100).toFixed(2),
+        r.minutosFuera || 0,
         '',
       ]),
       columnStyles: {
         3: { halign: 'center' },
         4: { halign: 'right' },
         5: { halign: 'right' },
+        6: { halign: 'right' },
+        7: { halign: 'right' },
+        8: { halign: 'right' },
       },
       margin: { left: margin, right: margin },
     });
@@ -1073,29 +1493,494 @@ const RRHH: React.FC<Props> = ({
       setStatus({ message: 'No se encontró el ID del empleado actual.', success: false });
       return;
     }
-    const { error } = await getSupabaseClient()
-      .from('attendance')
-      .insert([{ employee_id: myEmployeeId, work_date: new Date().toISOString().slice(0, 10), type: 'propio' }]);
-    if (error) {
-      setStatus({ message: 'Error al registrar asistencia', success: false });
-    } else {
-      setStatus({ message: '¡Asistencia registrada!', success: true });
+    // Buscar proyecto asignado al empleado
+    const empleado = employees.find(e => e.id === myEmployeeId);
+    const proyecto = empleado && empleado.projectId ? projects.find(p => p.id === empleado.projectId) : null;
+    let projectCoords: [number, number] | null = null;
+    if (proyecto && proyecto.coordinates) {
+      const match = proyecto.coordinates.match(/(-?\d+\.?\d*),\s*(-?\d+\.?\d*)/);
+      if (match) projectCoords = [parseFloat(match[1]), parseFloat(match[2])];
     }
+    // Obtener ubicación actual
+    if (!navigator.geolocation) {
+      setStatus({ message: 'El dispositivo no soporta geolocalización.', success: false });
+      return;
+    }
+    setStatus('Obteniendo ubicación...');
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      let fueraRadio = false;
+      let distancia = 0;
+      if (projectCoords) {
+        // Calcular distancia Haversine
+        const toRad = (v: number) => (v * Math.PI) / 180;
+        const R = 6371000; // metros
+        const dLat = toRad(lat - projectCoords[0]);
+        const dLng = toRad(lng - projectCoords[1]);
+        const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(projectCoords[0])) * Math.cos(toRad(lat)) * Math.sin(dLng / 2) ** 2;
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        distancia = R * c;
+        fueraRadio = distancia > 100;
+      }
+      if (fueraRadio) {
+        setStatus({ message: `Fuera del radio permitido (${Math.round(distancia)}m del proyecto).`, success: false });
+        return;
+      }
+      // Registrar asistencia con ubicación
+      const { error } = await getSupabaseClient()
+        .from('attendance')
+        .insert([{ employee_id: myEmployeeId, work_date: new Date().toISOString().slice(0, 10), type: 'propio', location_lat: lat, location_lng: lng, outside_allowed_radius: fueraRadio }]);
+      if (error) {
+        setStatus({ message: 'Error al registrar asistencia', success: false });
+      } else {
+        setStatus({ message: '¡Asistencia registrada!', success: true });
+      }
+    }, (err) => {
+      setStatus({ message: 'No se pudo obtener la ubicación.', success: false });
+    }, { enableHighAccuracy: true, timeout: 10000 });
   };
 
   const handleMarkOtherAttendance = () => {
     alert('Funcionalidad para marcar asistencia de otro no implementada.');
   };
 
+  // ...existing code...
+  // Al renderizar el selector de puesto, deshabilitar si no hay vacante
+  // Ejemplo de uso en el selector:
+  // <select ...>
+  //   {Object.keys(VACANTES_POR_PUESTO).map(puesto => (
+  //     <option key={puesto} value={puesto} disabled={!hayVacante(puesto)}>
+  //       {puesto} {!hayVacante(puesto) ? '(Sin vacante)' : ''}
+  //     </option>
+  //   ))}
+  // </select>
+  // UI para importar contrato con firma y selfie
+  const renderSignatureAndSelfie = () => (
+    <div className="my-4">
+      <label className="block font-bold mb-1" htmlFor="signature-canvas">Firma digital del colaborador:</label>
+      <canvas
+        id="signature-canvas"
+        ref={signatureCanvasRef}
+        width={320}
+        height={100}
+        className="border border-gray-400 bg-white signature-canvas touch-none rounded"
+        onPointerDown={e => {
+          const canvas = signatureCanvasRef.current;
+          if (!canvas) return;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return;
+          ctx.beginPath();
+          ctx.moveTo(e.nativeEvent.offsetX, e.nativeEvent.offsetY);
+          const move = (ev: PointerEvent) => {
+            ctx.lineTo(ev.offsetX, ev.offsetY);
+            ctx.stroke();
+          };
+          const up = () => {
+            window.removeEventListener('pointermove', move);
+            window.removeEventListener('pointerup', up);
+            saveSignature();
+          };
+          window.addEventListener('pointermove', move);
+          window.addEventListener('pointerup', up);
+        }}
+      />
+      <div className="flex gap-2 mt-1">
+        <button type="button" className="btn-secondary" onClick={clearSignature}>Limpiar</button>
+      </div>
+      <label className="block font-bold mt-4 mb-1" htmlFor="selfie-input">Selfie del colaborador:</label>
+      <input id="selfie-input" type="file" accept="image/*" onChange={handleSelfieChange} title="Subir selfie" />
+      {selfieUrl && <img src={selfieUrl} alt="Selfie" className="mt-2 rounded shadow w-32 h-32 object-cover" />}
+      <div className="mt-4">
+        <label className="block font-bold mb-1" htmlFor="experience-years">Años de experiencia en el puesto:</label>
+        <input id="experience-years" type="number" min="0" value={experienceYears} onChange={e => setExperienceYears(Number(e.target.value))} className="input input-bordered w-24" title="Años de experiencia" />
+      </div>
+      <div className="mt-4">
+        <label className="block font-bold mb-1">Referencias laborales (mínimo 2 para puestos técnicos):</label>
+        <div className="flex gap-2 mb-2">
+          <input type="text" placeholder="Empresa" value={referenceCompany} onChange={e => setReferenceCompany(e.target.value)} className="input input-bordered w-40" />
+          <input type="text" placeholder="Tipo obra (residencial, comercial, etc)" value={referenceType} onChange={e => setReferenceType(e.target.value)} className="input input-bordered w-40" />
+          <button type="button" className="btn-primary" onClick={() => {
+            if (referenceCompany && referenceType) {
+              setReferences([...references, { company: referenceCompany, type: referenceType }]);
+              setReferenceCompany('');
+              setReferenceType('');
+            }
+          }}>Agregar</button>
+        </div>
+        <ul className="list-disc ml-6">
+          {references.map((r, i) => (
+            <li key={i}>{r.company} ({r.type}) <button type="button" className="text-red-600 ml-2" onClick={() => setReferences(references.filter((_, idx) => idx !== i))}>Quitar</button></li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+
+  const payrollPreviewRows = useMemo(() => {
+    const projectNameById = new Map<string, string>();
+    projects.forEach((p) => {
+      if (p?.id) projectNameById.set(String(p.id), String(p.name ?? ''));
+    });
+
+    return employeesWithOverrides.map((e) => {
+      const dailyRate = safeNumber(employeeRateOverrides[e.id] ?? e.dailyRate, e.dailyRate);
+      const asis = payrollAttendanceRows.filter((a) => a.employee_id === e.id);
+      const { dias, minutos, pago } = calcularPagoPorHoras(asis, dailyRate);
+      const minutosFuera = calcularMinutosFuera(asis);
+      const descuento = (minutosFuera / (8 * 60)) * dailyRate * dias;
+      const total = pago - descuento;
+      const projectName = e.projectId ? (projectNameById.get(String(e.projectId)) ?? '') : '';
+      return {
+        employeeId: e.id,
+        employee: e.name,
+        position: String(e.position ?? ''),
+        projectName,
+        daysWorked: dias,
+        minutesWorked: minutos,
+        minutesOutside: minutosFuera,
+        dailyRate,
+        total: Math.round(total * 100) / 100,
+        discount: Math.round(descuento * 100) / 100,
+      };
+    });
+  }, [employeesWithOverrides, employeeRateOverrides, payrollAttendanceRows, projects]);
+
+  const payrollGrandTotal = useMemo(() => {
+    return payrollPreviewRows.reduce((sum, r) => sum + safeNumber(r.total, 0), 0);
+  }, [payrollPreviewRows]);
+
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50">
-      <h1 className="text-2xl font-bold mb-6">Asistencia M&S</h1>
-      <button className="btn-primary mb-4" onClick={handleMarkMyAttendance}>
-        Marcar mi asistencia
-      </button>
-      <button className="btn-secondary mb-4" onClick={handleMarkOtherAttendance}>
-        Marcar asistencia de otro
-      </button>
+      <h1 className="text-2xl font-bold mb-4">RRHH M&S</h1>
+
+      <div className="w-full max-w-4xl flex gap-2 mb-6">
+        <button
+          type="button"
+          className={activeTab === 'CONTRATOS' ? 'btn-primary' : 'btn-secondary'}
+          onClick={() => setActiveTab('CONTRATOS')}
+        >
+          Contratos
+        </button>
+        <button
+          type="button"
+          className={activeTab === 'ASISTENCIA' ? 'btn-primary' : 'btn-secondary'}
+          onClick={() => setActiveTab('ASISTENCIA')}
+        >
+          Asistencia
+        </button>
+        <button
+          type="button"
+          className={activeTab === 'PLANILLA' ? 'btn-primary' : 'btn-secondary'}
+          onClick={() => setActiveTab('PLANILLA')}
+        >
+          Planilla
+        </button>
+      </div>
+
+      {activeTab === 'CONTRATOS' && (
+        <div className="w-full max-w-4xl space-y-6">
+          <div className="bg-white rounded shadow p-4">
+            <h2 className="font-bold mb-3 flex items-center gap-2"><FileText size={18} /> Generar contrato</h2>
+            <div className="flex flex-wrap gap-2">
+              <input value={contractName} onChange={(e) => setContractName(e.target.value)} className="input input-bordered" placeholder="Nombre" />
+              <input value={contractDpi} onChange={(e) => setContractDpi(e.target.value)} className="input input-bordered" placeholder="DPI" />
+              <input value={contractPhone} onChange={(e) => setContractPhone(e.target.value)} className="input input-bordered" placeholder="Teléfono" />
+              <select value={contractRole} onChange={(e) => setContractRole(e.target.value)} className="input input-bordered" aria-label="Puesto" title="Puesto">
+                <option value="">Puesto</option>
+                {Object.keys(PAY_RATES).map((k) => (
+                  <option key={k} value={k}>{k}</option>
+                ))}
+              </select>
+              <select value={contractProjectId} onChange={(e) => setContractProjectId(e.target.value)} className="input input-bordered" aria-label="Proyecto" title="Proyecto">
+                <option value="">Proyecto</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+              <input
+                type="number"
+                value={contractDailyRate}
+                onChange={(e) => setContractDailyRate(Number(e.target.value))}
+                className="input input-bordered w-32"
+                placeholder="Q/día"
+                title="Salario diario"
+              />
+              <button type="button" className="btn-primary" onClick={handleSendContractLink}>Enviar link</button>
+            </div>
+
+            {contractLink && (
+              <div className="mt-3">
+                <div className="text-sm mb-2 break-all">{contractLink}</div>
+                <div className="flex gap-2">
+                  <button type="button" className="btn-secondary" onClick={handleCopyContractLink}><Copy size={16} /> Copiar</button>
+                  <button type="button" className="btn-primary" onClick={handleWhatsAppContractLink}><Send size={16} /> WhatsApp</button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white rounded shadow p-4">
+            <h2 className="font-bold mb-3">Importar respuesta de contrato (código)</h2>
+            {renderSignatureAndSelfie()}
+            <div className="flex flex-wrap gap-2 items-center">
+              <input
+                value={contractImportCode}
+                onChange={(e) => setContractImportCode(e.target.value)}
+                className="input input-bordered flex-1"
+                placeholder="Pega el CÓDIGO DE RESPUESTA"
+              />
+              <button type="button" className="btn-primary" onClick={handleImportContract}>Importar</button>
+            </div>
+          </div>
+
+          <div className="bg-white rounded shadow p-4">
+            <h2 className="font-bold mb-3">Contratos</h2>
+            <table className="table-auto w-full text-xs">
+              <thead>
+                <tr>
+                  <th>Empleado</th>
+                  <th>Puesto</th>
+                  <th>Proyecto</th>
+                  <th>Estado</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {contracts.map((c) => (
+                  <tr key={c.requestId} className={c.status === 'received' ? 'bg-green-50' : ''}>
+                    <td>{c.seed.employeeName}</td>
+                    <td>{c.seed.role}</td>
+                    <td>{c.seed.projectName || '—'}</td>
+                    <td>{c.status === 'received' ? 'Recibido' : 'Enviado'}</td>
+                    <td className="whitespace-nowrap">
+                      <button type="button" className="btn-secondary btn-xs mr-1" onClick={() => printContract(c)}>Imprimir</button>
+                      <button type="button" className="btn-secondary btn-xs" onClick={() => downloadContractPdf(c)}>PDF</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="bg-white rounded shadow p-4">
+            <h2 className="font-bold mb-3">Empleados (links de asistencia)</h2>
+            <table className="table-auto w-full text-xs">
+              <thead>
+                <tr>
+                  <th>Empleado</th>
+                  <th>Puesto</th>
+                  <th>Teléfono</th>
+                  <th>Q/día</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {employeesWithOverrides.map((e) => {
+                  const canSendLink = Boolean(onSetAttendanceToken) && acceptedEmployeeIds.has(e.id);
+                  return (
+                    <tr key={e.id}>
+                      <td>{e.name}</td>
+                      <td>{String(e.position ?? '')}</td>
+                      <td>{e.phone || '—'}</td>
+                      <td>
+                        <input
+                          type="number"
+                          className="input input-bordered w-28"
+                          value={employeeRateOverrides[e.id] ?? ''}
+                          placeholder={String(e.dailyRate ?? '')}
+                          onChange={(ev) => handleUpdateEmployeeRate(e.id, Number(ev.target.value))}
+                          title="Override salario diario"
+                        />
+                      </td>
+                      <td className="whitespace-nowrap">
+                        <button
+                          type="button"
+                          className={canSendLink ? 'btn-primary btn-xs' : 'btn-secondary btn-xs'}
+                          disabled={!canSendLink}
+                          title={!onSetAttendanceToken ? 'Supabase no configurado' : (!acceptedEmployeeIds.has(e.id) ? 'Requiere contrato aceptado (recibido)' : '')}
+                          onClick={() => handleGenerateWorkerLink(e.id, e.phone || null)}
+                        >
+                          Enviar link
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {!onSetAttendanceToken && (
+              <div className="text-xs text-gray-500 mt-2">Nota: para generar links, configure Supabase (RPC set_employee_attendance_token).</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'ASISTENCIA' && (
+        <div className="w-full max-w-4xl space-y-6">
+          {isAdmin && alerts.length > 0 && (
+            <div className="w-full">
+              {alerts.map((a, i) => (
+                <div key={i} className="bg-red-100 border border-red-300 text-red-700 rounded p-2 mb-2 text-sm font-semibold">
+                  {a}
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="bg-white rounded shadow p-4">
+            <h2 className="font-bold mb-3 flex items-center gap-2"><MapPin size={18} /> Asistencia por día</h2>
+            <div className="flex flex-wrap gap-2 items-center">
+              <input
+                type="date"
+                value={attendanceDate}
+                onChange={(e) => setAttendanceDate(e.target.value)}
+                className="input input-bordered"
+                aria-label="Fecha"
+                title="Fecha"
+              />
+              <button type="button" className="btn-secondary" onClick={refreshAttendance} disabled={loadingAttendance}>
+                {loadingAttendance ? 'Cargando...' : 'Refrescar'}
+              </button>
+              <button type="button" className="btn-primary" onClick={handleMarkMyAttendance}>Marcar mi asistencia</button>
+              <button type="button" className="btn-secondary" onClick={handleMarkOtherAttendance}>Marcar asistencia de otro</button>
+            </div>
+
+            {isAdmin && attendanceCenter && (
+              <div className="my-4 w-full h-96 rounded-xl overflow-hidden shadow">
+                <MapContainer center={attendanceCenter} zoom={16} style={{ width: '100%', height: '100%' }}>
+                  <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                  {attendanceRows
+                    .filter((x) => Number.isFinite(Number(x?.location_lat)) && Number.isFinite(Number(x?.location_lng)))
+                    .map((row, idx) => (
+                      <Marker key={idx} position={[Number(row.location_lat), Number(row.location_lng)]}>
+                        <Popup>
+                          <div>
+                            <b>{employees.find((e) => e.id === row.employee_id)?.name || row.employee_id || 'Empleado'}</b>
+                            <br />
+                            {row.check_in ? `Entrada: ${row.check_in}` : ''}
+                            <br />
+                            {row.check_out ? `Salida: ${row.check_out}` : ''}
+                          </div>
+                        </Popup>
+                      </Marker>
+                    ))}
+                </MapContainer>
+              </div>
+            )}
+          </div>
+
+          {isAdmin && (
+            <div className="bg-white rounded shadow p-4">
+              <h2 className="font-bold mb-2">Asistencias manuales</h2>
+              <div className="flex gap-2 mb-2 flex-wrap">
+                <select value={newAttendance.employee_id} onChange={e => setNewAttendance(a => ({ ...a, employee_id: e.target.value }))} className="input input-bordered" aria-label="Empleado" title="Empleado">
+                  <option value="">Empleado</option>
+                  {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+                </select>
+                <input type="date" value={newAttendance.work_date} onChange={e => setNewAttendance(a => ({ ...a, work_date: e.target.value }))} className="input input-bordered" title="Fecha" aria-label="Fecha" />
+                <input type="time" value={newAttendance.check_in} onChange={e => setNewAttendance(a => ({ ...a, check_in: e.target.value }))} className="input input-bordered" placeholder="Check-in" />
+                <input type="time" value={newAttendance.check_out} onChange={e => setNewAttendance(a => ({ ...a, check_out: e.target.value }))} className="input input-bordered" placeholder="Check-out" />
+                <input type="number" step="any" value={newAttendance.location_lat} onChange={e => setNewAttendance(a => ({ ...a, location_lat: e.target.value }))} className="input input-bordered w-24" placeholder="Lat" />
+                <input type="number" step="any" value={newAttendance.location_lng} onChange={e => setNewAttendance(a => ({ ...a, location_lng: e.target.value }))} className="input input-bordered w-24" placeholder="Lng" />
+                <button type="button" className="btn-primary" onClick={handleSaveAttendance}>Agregar</button>
+              </div>
+              <table className="table-auto w-full text-xs">
+                <thead><tr><th>Empleado</th><th>Fecha</th><th>Check-in</th><th>Check-out</th><th>Lat</th><th>Lng</th><th></th></tr></thead>
+                <tbody>
+                  {attendanceRows.map(a => (
+                    <tr key={a.id} className={editingAttendance && editingAttendance.id === a.id ? 'bg-yellow-100' : ''}>
+                      <td>{employees.find(e => e.id === a.employee_id)?.name || a.employee_id}</td>
+                      <td>{a.work_date || a.date}</td>
+                      <td>{a.check_in || a.checkIn || ''}</td>
+                      <td>{a.check_out || a.checkOut || ''}</td>
+                      <td>{a.location_lat || ''}</td>
+                      <td>{a.location_lng || ''}</td>
+                      <td>
+                        <button type="button" className="btn-secondary btn-xs mr-1" onClick={() => setEditingAttendance({ ...a })}>Editar</button>
+                        <button type="button" className="btn-error btn-xs" onClick={() => handleDeleteAttendance(a.id)}>Eliminar</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {editingAttendance && (
+                <div className="flex gap-2 mt-2 flex-wrap">
+                  <input type="time" value={editingAttendance.check_in || ''} onChange={e => setEditingAttendance(a => ({ ...a, check_in: e.target.value }))} className="input input-bordered" placeholder="Check-in" />
+                  <input type="time" value={editingAttendance.check_out || ''} onChange={e => setEditingAttendance(a => ({ ...a, check_out: e.target.value }))} className="input input-bordered" placeholder="Check-out" />
+                  <input type="number" step="any" value={editingAttendance.location_lat || ''} onChange={e => setEditingAttendance(a => ({ ...a, location_lat: e.target.value }))} className="input input-bordered w-24" placeholder="Lat" />
+                  <input type="number" step="any" value={editingAttendance.location_lng || ''} onChange={e => setEditingAttendance(a => ({ ...a, location_lng: e.target.value }))} className="input input-bordered w-24" placeholder="Lng" />
+                  <button type="button" className="btn-primary" onClick={handleUpdateAttendance}>Guardar</button>
+                  <button type="button" className="btn-secondary" onClick={() => setEditingAttendance(null)}>Cancelar</button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'PLANILLA' && (
+        <div className="w-full max-w-4xl space-y-6">
+          {!isAdmin ? (
+            <div className="bg-white rounded shadow p-4 text-sm text-gray-600">Solo admin puede ver planilla.</div>
+          ) : (
+            <>
+              <div className="bg-white rounded shadow p-4">
+                <h2 className="font-bold mb-3">Planilla semanal</h2>
+                <div className="flex flex-wrap gap-2 items-center">
+                  <input type="date" value={payrollStart} onChange={(e) => setPayrollStart(e.target.value)} className="input input-bordered" title="Inicio" aria-label="Inicio" />
+                  <input type="date" value={payrollEnd} onChange={(e) => setPayrollEnd(e.target.value)} className="input input-bordered" title="Fin" aria-label="Fin" />
+                  <button type="button" className="btn-secondary" onClick={refreshPayrollAttendance} disabled={loadingPayrollAttendance}>
+                    {loadingPayrollAttendance ? 'Cargando...' : 'Cargar asistencias'}
+                  </button>
+                  <button type="button" className="btn-primary" onClick={downloadPayrollPdf}>
+                    Exportar PDF
+                  </button>
+                </div>
+                <div className="text-xs text-gray-500 mt-2">
+                  Registros cargados: {payrollAttendanceRows.length}
+                </div>
+              </div>
+
+              <div className="bg-white rounded shadow p-4">
+                <h2 className="font-bold mb-3">Resumen</h2>
+                <table className="table-auto w-full text-xs">
+                  <thead>
+                    <tr>
+                      <th>Empleado</th>
+                      <th>Puesto</th>
+                      <th>Proyecto</th>
+                      <th>Días</th>
+                      <th>Min. trabajados</th>
+                      <th>Q/día</th>
+                      <th>Total (Q)</th>
+                      <th>Descuento (Q)</th>
+                      <th>Min. fuera</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {payrollPreviewRows.map((r) => (
+                      <tr key={r.employeeId}>
+                        <td>{r.employee}</td>
+                        <td>{r.position}</td>
+                        <td>{r.projectName || '—'}</td>
+                        <td className="text-center">{r.daysWorked}</td>
+                        <td className="text-right">{r.minutesWorked}</td>
+                        <td className="text-right">{(Math.round(r.dailyRate * 100) / 100).toFixed(2)}</td>
+                        <td className="text-right">{(Math.round(r.total * 100) / 100).toFixed(2)}</td>
+                        <td className="text-right">{(Math.round(r.discount * 100) / 100).toFixed(2)}</td>
+                        <td className="text-right">{r.minutesOutside}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="mt-3 font-bold">TOTAL GENERAL: Q{(Math.round(payrollGrandTotal * 100) / 100).toFixed(2)}</div>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       {status && (
         <div className="mt-4 text-red-600">
           {typeof status === 'string'
@@ -1105,6 +1990,7 @@ const RRHH: React.FC<Props> = ({
               : ''}
         </div>
       )}
+
       <ToastContainer aria-label="Notificaciones" />
     </div>
   );
@@ -1112,7 +1998,7 @@ const RRHH: React.FC<Props> = ({
 
 export default RRHH;
 
-export function useRealtimeAttendance(onNewAttendance) {
+export function useRealtimeAttendance(onNewAttendance: (row: any) => void): void {
   useEffect(() => {
     const supabase = getSupabaseClient();
     const channel = supabase

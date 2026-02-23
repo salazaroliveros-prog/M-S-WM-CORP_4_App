@@ -1,5 +1,12 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabaseClient';
 import { Project, BudgetLine, Typology, MaterialItem, RequisitionData, RoofType } from '../types';
+
+/*
+  NOTE (preserved): There was a "Realtime integration" hooks block here at module scope.
+  That breaks Rules of Hooks and referenced component-scope variables.
+  The block was moved inside the `Presupuestos` component below to keep behavior.
+*/
 import { DEFAULT_BUDGET_LINES, DEFAULT_ROOF_BUDGET_LINES, calculateAPU } from '../constants';
 import { Printer, Save, RefreshCw, Upload, Download, AlertTriangle, CheckCircle, ChevronDown, ChevronUp, ChevronLeft, Plus, Trash2, Calculator, ShoppingCart, ArrowRight, X, List } from 'lucide-react';
 import jsPDF from 'jspdf';
@@ -71,7 +78,7 @@ const buildRoofMetaLine = (projectId: string, t: RoofType): BudgetLine => ({
   materials: [],
 });
 
-const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion, onQuickBuy, onLoadBudget, onSaveBudget, onImportMaterialPrices, onImportMaterialPricesText, onSuggestLineFromCatalog, onImportApuTemplates, onImportApuTemplatesCsv, onImportApuTemplatesCsvText }) => {
+const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion, onQuickBuy, onLoadBudget, onSaveBudget, onImportMaterialPrices, onImportMaterialPricesText, onSuggestLineFromCatalog, onImportApuTemplates, onImportApuTemplatesCsv, onImportApuTemplatesCsvText, onImportApuTemplatesJsonText }) => {
   const [selectedProjectId, setSelectedProjectId] = useState(initialProjectId || '');
   const [typology, setTypology] = useState<Typology | ''>('');
   const [roofType, setRoofType] = useState<RoofType | ''>('');
@@ -85,6 +92,71 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
 
   const lastLoadedSnapshotRef = useRef<string>('');
   const [isDirty, setIsDirty] = useState(false);
+
+  // --- Realtime integration ---
+  const channelRef = useRef<any>(null);
+
+  // Get orgId from the selected project (all budget lines are for the same org)
+  const orgId = useMemo(() => {
+    const project = projects.find((p) => p.id === selectedProjectId);
+    return project ? ((project as any).orgId || (project as any).org_id) : null;
+  }, [projects, selectedProjectId]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !orgId || !selectedProjectId || !onLoadBudget) {
+      return;
+    }
+    const supabase = getSupabaseClient();
+    const channel = supabase
+      .channel(`budget_lines:${orgId}:${selectedProjectId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'budget_lines', filter: `org_id=eq.${orgId}` },
+        async (_payload: any) => {
+          // Only reload if not dirty
+          if (!isDirty) {
+            try {
+              const loaded = await onLoadBudget(selectedProjectId);
+              if (loaded) {
+                const t = String(loaded.typology ?? '').trim();
+                if ([
+                  'RESIDENCIAL',
+                  'COMERCIAL',
+                  'INDUSTRIAL',
+                  'CIVIL',
+                  'PUBLICA',
+                ].includes(t)) {
+                  setTypology(t as Typology);
+                }
+                const parsedRoof = parseRoofTypeFromLines(loaded.lines);
+                setRoofType(parsedRoof);
+                setBudgetLines(loaded.lines);
+                setIndirectCostPercentageStr(loaded.indirectPct);
+                lastLoadedSnapshotRef.current = JSON.stringify({
+                  selectedProjectId,
+                  typology: String((loaded.typology ?? '') || ''),
+                  roofType: String(parsedRoof || ''),
+                  indirectPct: String(loaded.indirectPct || ''),
+                  lines: loaded.lines,
+                });
+                setIsDirty(false);
+              }
+            } catch {
+              // ignore
+            }
+          }
+        }
+      )
+      .subscribe();
+
+    channelRef.current = channel;
+    return () => {
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+    };
+  }, [orgId, selectedProjectId, onLoadBudget, isDirty]);
 
   const snapshot = () => {
     try {
