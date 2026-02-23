@@ -1430,7 +1430,77 @@ const RRHH: React.FC<Props> = ({
   };
 
   const handleMarkOtherAttendance = () => {
-    alert('Funcionalidad para marcar asistencia de otro no implementada.');
+    if (!isAdmin) {
+      alert('Solo admin puede marcar asistencia de otros.');
+      return;
+    }
+    if (!employees || employees.length === 0) {
+      alert('No hay empleados registrados.');
+      return;
+    }
+
+    const maxList = 30;
+    const list = employees
+      .slice(0, maxList)
+      .map((e, idx) => `${idx + 1}) ${e.name}`)
+      .join('\n');
+    const suffix = employees.length > maxList ? `\n... y ${employees.length - maxList} más` : '';
+    const pick = prompt(`Seleccione empleado (número):\n${list}${suffix}`);
+    if (!pick) return;
+    const n = Number(pick);
+    if (!Number.isFinite(n) || n < 1 || n > Math.min(maxList, employees.length)) {
+      alert('Selección inválida.');
+      return;
+    }
+    const emp = employees[n - 1];
+    if (!emp) return;
+
+    const workDate = attendanceDate || new Date().toISOString().slice(0, 10);
+    const now = new Date();
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    const checkIn = `${hh}:${mm}`;
+
+    const saveRow = async (coords?: { lat: number; lng: number }) => {
+      const row = {
+        id: crypto.randomUUID(),
+        employee_id: emp.id,
+        work_date: workDate,
+        check_in: checkIn,
+        check_out: '',
+        location_lat: coords ? String(coords.lat) : '',
+        location_lng: coords ? String(coords.lng) : '',
+      };
+
+      const existing = readJson<any[]>(STORAGE_ATTENDANCE_MANUAL, []);
+      writeJson(STORAGE_ATTENDANCE_MANUAL, [row, ...(Array.isArray(existing) ? existing : [])]);
+
+      const pending = readJson<any[]>(STORAGE_PENDING_ATTENDANCE_MANUAL, []);
+      writeJson(STORAGE_PENDING_ATTENDANCE_MANUAL, [...(Array.isArray(pending) ? pending : []), { type: 'upsert', row }]);
+
+      try {
+        await getSupabaseClient().from('attendance').upsert([{ ...row }]);
+      } catch {
+        // offline or RLS; queued for later
+      }
+
+      refreshAttendance();
+    };
+
+    if (!navigator.geolocation) {
+      void saveRow();
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        void saveRow({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+      },
+      () => {
+        void saveRow();
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
   };
 
   // ...existing code...

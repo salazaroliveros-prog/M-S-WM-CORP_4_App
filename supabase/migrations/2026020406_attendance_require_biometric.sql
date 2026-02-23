@@ -2,7 +2,6 @@
 -- Date: 2026-02-04
 
 begin;
-
 drop function if exists app.submit_attendance_with_token(text, text, date, numeric, numeric, numeric, jsonb, jsonb);
 create or replace function app.submit_attendance_with_token(
   p_token text,
@@ -131,8 +130,6 @@ begin
   return v_row;
 end;
 $$;
-
 revoke all on function app.submit_attendance_with_token(text, text, numeric, numeric, date, numeric, jsonb, jsonb) from public;
 grant execute on function app.submit_attendance_with_token(text, text, numeric, numeric, date, numeric, jsonb, jsonb) to anon, authenticated;
-
 commit;

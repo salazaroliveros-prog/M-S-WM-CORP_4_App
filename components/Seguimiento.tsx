@@ -66,10 +66,18 @@ type TxRow = {
   id: string;
   project_id: string | null;
   type: 'INGRESO' | 'GASTO' | string;
+  description?: string;
+  amount?: number;
+  unit?: string;
   cost: number;
   category: string | null;
   occurred_at: string;
+  provider?: string | null;
+  rent_end_date?: string | null;
 };
+
+const PENDING_TRANSACTION_UPDATES_KEY = 'wm_pending_transaction_updates_v1';
+const PENDING_TRANSACTION_DELETES_KEY = 'wm_pending_transaction_deletes_v1';
 
 type ExecMaterialRow = {
   name: string;
@@ -202,6 +210,19 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
 
   const [transactions, setTransactions] = useState<TxRow[]>([]);
   const [metricsError, setMetricsError] = useState<string | null>(null);
+  const [txDateFrom, setTxDateFrom] = useState('');
+  const [txDateTo, setTxDateTo] = useState('');
+  const [txTypeIn, setTxTypeIn] = useState({ INGRESO: true, GASTO: true });
+  const [txCategoriesIn, setTxCategoriesIn] = useState<string[]>([]);
+  const [editingTxId, setEditingTxId] = useState<string | null>(null);
+  const [editTxDraft, setEditTxDraft] = useState<{ date: string; type: 'INGRESO' | 'GASTO'; category: string; description: string; cost: string; provider: string }>({
+    date: '',
+    type: 'GASTO',
+    category: '',
+    description: '',
+    cost: '',
+    provider: '',
+  });
   const [execMaterials, setExecMaterials] = useState<ExecMaterialRow[]>([]);
   const [execMaterialsError, setExecMaterialsError] = useState<string | null>(null);
   const refreshTimer = useRef<number | null>(null);
@@ -211,6 +232,11 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
 
   const allProjects = useMemo(() => projects.slice(), [projects]);
   const projectsByCreated = useMemo(() => projects.slice(), [projects]);
+  const projectNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const p of projects) map.set(p.id, p.name);
+    return map;
+  }, [projects]);
   const selectedProject = useMemo(
     () => projects.find(p => p.id === selectedProjectId) || null,
     [projects, selectedProjectId]
@@ -243,6 +269,321 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
   };
 
   const normalizeMatKey = (name: string, unit: string) => `${normalizeKey(name)}__${normalizeKey(unit || 'Unidad')}`;
+
+  const readLocalTransactions = (): any[] => {
+    try {
+      const raw = localStorage.getItem('transactions');
+      const txs: any[] = raw ? JSON.parse(raw) : [];
+      return Array.isArray(txs) ? txs : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const writeLocalTransactions = (txs: any[]) => {
+    try {
+      localStorage.setItem('transactions', JSON.stringify(txs));
+    } catch {
+      // ignore
+    }
+  };
+
+  const updateLocalTransaction = (id: string, patch: Partial<{ date: string; type: string; category: string; description: string; cost: number; amount: number; provider: string | null }>) => {
+    const txs = readLocalTransactions();
+    const idx = txs.findIndex((t) => String(t?.id) === String(id));
+    const prev = idx >= 0 ? (txs[idx] ?? {}) : {};
+    const next = { ...prev, id };
+    if (patch.date !== undefined) next.date = patch.date;
+    if (patch.type !== undefined) next.type = patch.type;
+    if (patch.category !== undefined) next.category = patch.category;
+    if (patch.description !== undefined) next.description = patch.description;
+    if (patch.cost !== undefined) next.cost = patch.cost;
+    if (patch.amount !== undefined) next.amount = patch.amount;
+    if (patch.provider !== undefined) next.provider = patch.provider ?? undefined;
+    if (idx >= 0) txs[idx] = next;
+    else txs.push(next);
+    writeLocalTransactions(txs);
+  };
+
+  const upsertLocalFromTxRow = (row: TxRow) => {
+    const id = String(row?.id ?? '').trim();
+    if (!id) return;
+    const txs = readLocalTransactions();
+    const idx = txs.findIndex((t) => String(t?.id) === id);
+    const prev = idx >= 0 ? (txs[idx] ?? {}) : {};
+    const next = {
+      ...prev,
+      id,
+      projectId: row.project_id ?? prev.projectId,
+      type: row.type ?? prev.type,
+      description: row.description ?? prev.description ?? '',
+      amount: row.amount ?? prev.amount ?? row.cost ?? prev.cost ?? 0,
+      unit: row.unit ?? prev.unit ?? '',
+      cost: row.cost ?? prev.cost ?? 0,
+      category: row.category ?? prev.category ?? '',
+      date: row.occurred_at ?? prev.date ?? new Date().toISOString(),
+      provider: row.provider ?? prev.provider,
+      rentEndDate: row.rent_end_date ?? prev.rentEndDate,
+    };
+    if (idx >= 0) txs[idx] = next;
+    else txs.push(next);
+    writeLocalTransactions(txs);
+  };
+
+  const queueTxUpdate = (op: any) => {
+    try {
+      const rawDeletes = localStorage.getItem(PENDING_TRANSACTION_DELETES_KEY);
+      const pendingDeletes: any[] = rawDeletes ? JSON.parse(rawDeletes) : [];
+      const deleteIds = new Set(
+        Array.isArray(pendingDeletes)
+          ? pendingDeletes
+              .map((d) => String(d?.id ?? ''))
+              .filter((x) => x)
+          : []
+      );
+      const id = String(op?.id ?? '');
+      if (!id || deleteIds.has(id)) return;
+
+      const raw = localStorage.getItem(PENDING_TRANSACTION_UPDATES_KEY);
+      const pending: any[] = raw ? JSON.parse(raw) : [];
+      const next = Array.isArray(pending) ? pending.filter((x) => String(x?.id ?? '') !== id) : [];
+      next.push(op);
+      localStorage.setItem(PENDING_TRANSACTION_UPDATES_KEY, JSON.stringify(next));
+    } catch (e) {
+      console.warn('No se pudo encolar update de transacción', e);
+    }
+  };
+
+  const queueTxDelete = (id: string) => {
+    try {
+      // remove pending updates for this id
+      try {
+        const rawUpdates = localStorage.getItem(PENDING_TRANSACTION_UPDATES_KEY);
+        const updates: any[] = rawUpdates ? JSON.parse(rawUpdates) : [];
+        if (Array.isArray(updates) && updates.length) {
+          const filtered = updates.filter((u) => String(u?.id ?? '') !== String(id));
+          localStorage.setItem(PENDING_TRANSACTION_UPDATES_KEY, JSON.stringify(filtered));
+        }
+      } catch {
+        // ignore
+      }
+
+      const raw = localStorage.getItem(PENDING_TRANSACTION_DELETES_KEY);
+      const pending: any[] = raw ? JSON.parse(raw) : [];
+      const next = Array.isArray(pending) ? pending : [];
+      const exists = next.some((d) => String(d?.id ?? '') === String(id));
+      if (!exists) next.push({ id, deletedAt: new Date().toISOString() });
+      localStorage.setItem(PENDING_TRANSACTION_DELETES_KEY, JSON.stringify(next));
+    } catch (e) {
+      console.warn('No se pudo encolar delete de transacción', e);
+    }
+  };
+
+  const deleteLocalTransaction = (id: string) => {
+    const txs = readLocalTransactions();
+    const next = txs.filter((t) => String(t?.id) !== String(id));
+    writeLocalTransactions(next);
+  };
+
+  const saveTransaction = async (id: string, patch: { occurred_at: string; type: 'INGRESO' | 'GASTO'; category: string; description: string; cost: number; provider?: string | null }) => {
+    const prev = transactions;
+    const optimistic = transactions.map((t) =>
+      t.id === id
+        ? {
+            ...t,
+            occurred_at: patch.occurred_at,
+            type: patch.type,
+            category: patch.category,
+            description: patch.description,
+            cost: patch.cost,
+            amount: patch.cost,
+            provider: patch.provider ?? null,
+          }
+        : t
+    );
+    optimistic.sort((a, b) => new Date(a.occurred_at).getTime() - new Date(b.occurred_at).getTime());
+    setTransactions(optimistic);
+
+    // keep local cache in sync for offline fallback
+    try {
+      const row = optimistic.find((t) => t.id === id);
+      if (row) upsertLocalFromTxRow(row);
+    } catch {
+      // ignore
+    }
+
+    try {
+      if (useCloud && orgId && isSupabaseConfigured) {
+        const supabase = getSupabaseClient();
+        const res = await supabase
+          .from('transactions')
+          .update({
+            occurred_at: patch.occurred_at,
+            type: patch.type,
+            category: patch.category,
+            description: patch.description,
+            cost: patch.cost,
+            amount: patch.cost,
+            provider: patch.provider ?? null,
+          })
+          .eq('org_id', orgId)
+          .eq('id', id);
+        if (res.error) throw res.error;
+      } else {
+        updateLocalTransaction(id, {
+          date: patch.occurred_at,
+          type: patch.type,
+          category: patch.category,
+          description: patch.description,
+          cost: patch.cost,
+          amount: patch.cost,
+          provider: patch.provider ?? null,
+        });
+      }
+    } catch (e: any) {
+      if (useCloud && orgId && isSupabaseConfigured) {
+        queueTxUpdate({
+          id,
+          patch: {
+            type: patch.type,
+            category: patch.category,
+            description: patch.description,
+            cost: patch.cost,
+            amount: patch.cost,
+            date: patch.occurred_at,
+            provider: patch.provider ?? null,
+          },
+          queuedAt: new Date().toISOString(),
+        });
+        // keep optimistic state; will sync on reconnection
+        console.warn('Transacción guardada localmente y encolada para sincronizar', e);
+        return;
+      }
+
+      setTransactions(prev);
+      alert(e?.message || 'No se pudo guardar la transacción');
+      throw e;
+    }
+  };
+
+  const removeTransaction = async (id: string) => {
+    const prev = transactions;
+    setTransactions((p) => p.filter((t) => t.id !== id));
+    try {
+      // update local cache for offline fallback
+      deleteLocalTransaction(id);
+    } catch {
+      // ignore
+    }
+    try {
+      if (useCloud && orgId && isSupabaseConfigured) {
+        const supabase = getSupabaseClient();
+        const res = await supabase.from('transactions').delete().eq('org_id', orgId).eq('id', id);
+        if (res.error) throw res.error;
+      } else {
+        deleteLocalTransaction(id);
+      }
+    } catch (e: any) {
+      if (useCloud && orgId && isSupabaseConfigured) {
+        queueTxDelete(id);
+        console.warn('Transacción eliminada localmente y encolada para sincronizar', e);
+        return;
+      }
+
+      setTransactions(prev);
+      alert(e?.message || 'No se pudo eliminar la transacción');
+      throw e;
+    }
+  };
+
+  const txRowsForTable = useMemo(() => {
+    const projectFiltered = selectedProjectId
+      ? transactions.filter((t) => String(t.project_id || '') === String(selectedProjectId))
+      : transactions;
+
+    const fromTs = txDateFrom ? new Date(`${txDateFrom}T00:00:00`).getTime() : null;
+    const toTs = txDateTo ? new Date(`${txDateTo}T23:59:59`).getTime() : null;
+    const categorySet = new Set(txCategoriesIn.map((c) => String(c)));
+
+    return projectFiltered.filter((t) => {
+      const type = String(t.type || '').toUpperCase();
+      if (type === 'INGRESO' && !txTypeIn.INGRESO) return false;
+      if (type === 'GASTO' && !txTypeIn.GASTO) return false;
+
+      const ts = new Date(t.occurred_at).getTime();
+      if (fromTs !== null && !Number.isNaN(ts) && ts < fromTs) return false;
+      if (toTs !== null && !Number.isNaN(ts) && ts > toTs) return false;
+
+      if (categorySet.size > 0) {
+        const cat = String(t.category ?? '');
+        if (!categorySet.has(cat)) return false;
+      }
+      return true;
+    });
+  }, [transactions, selectedProjectId, txDateFrom, txDateTo, txTypeIn, txCategoriesIn]);
+
+  const txCategoryOptions = useMemo(() => {
+    const projectFiltered = selectedProjectId
+      ? transactions.filter((t) => String(t.project_id || '') === String(selectedProjectId))
+      : transactions;
+    const cats = new Set<string>();
+    for (const t of projectFiltered) {
+      const c = String(t.category ?? '').trim();
+      if (c) cats.add(c);
+    }
+    return Array.from(cats).sort((a, b) => a.localeCompare(b));
+  }, [transactions, selectedProjectId]);
+
+  const toggleTxCategory = (cat: string) => {
+    setTxCategoriesIn((prev) => {
+      const set = new Set(prev);
+      if (set.has(cat)) set.delete(cat);
+      else set.add(cat);
+      return Array.from(set);
+    });
+  };
+
+  const beginEditTx = (t: TxRow) => {
+    const date = (() => {
+      const d = new Date(t.occurred_at);
+      if (Number.isNaN(d.getTime())) return '';
+      return d.toISOString().slice(0, 10);
+    })();
+    setEditingTxId(t.id);
+    setEditTxDraft({
+      date,
+      type: (String(t.type || 'GASTO').toUpperCase() === 'INGRESO' ? 'INGRESO' : 'GASTO') as 'INGRESO' | 'GASTO',
+      category: String(t.category ?? ''),
+      description: String(t.description ?? ''),
+      cost: String(Number(t.cost ?? 0) || 0),
+      provider: String(t.provider ?? ''),
+    });
+  };
+
+  const cancelEditTx = () => {
+    setEditingTxId(null);
+  };
+
+  const submitEditTx = async () => {
+    if (!editingTxId) return;
+    if (!editTxDraft.date) return alert('Seleccione una fecha');
+    if (!editTxDraft.category.trim()) return alert('Seleccione una categoría');
+    if (!editTxDraft.description.trim()) return alert('Ingrese una descripción');
+    const cost = Number(editTxDraft.cost);
+    if (!Number.isFinite(cost) || cost <= 0) return alert('Ingrese un monto válido');
+
+    const occurredAt = new Date(`${editTxDraft.date}T00:00:00`).toISOString();
+
+    await saveTransaction(editingTxId, {
+      occurred_at: occurredAt,
+      type: editTxDraft.type,
+      category: editTxDraft.category.trim(),
+      description: editTxDraft.description.trim(),
+      cost,
+      provider: editTxDraft.provider.trim() ? editTxDraft.provider.trim() : null,
+    });
+    setEditingTxId(null);
+  };
 
   const storageKey = (projectId: string) => `wm_progress_v1_${projectId}`;
   const selectedKey = () => 'wm_seguimiento_selected_project_v1';
@@ -722,47 +1063,105 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
 
   const loadTransactions = async () => {
     setMetricsError(null);
-    try {
-      const now = new Date();
-      const monthsBack = 11;
-      const rangeStart = new Date(now.getFullYear(), now.getMonth() - monthsBack, 1);
-      const rangeEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-      txRangeRef.current = { start: rangeStart.toISOString(), end: rangeEnd.toISOString() };
+    const now = new Date();
+    const monthsBack = 11;
+    const rangeStart = new Date(now.getFullYear(), now.getMonth() - monthsBack, 1);
+    const rangeEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    txRangeRef.current = { start: rangeStart.toISOString(), end: rangeEnd.toISOString() };
 
-      if (useCloud && orgId && isSupabaseConfigured) {
+    const loadFromLocal = () => {
+      const raw = localStorage.getItem('transactions');
+      const txs: any[] = raw ? JSON.parse(raw) : [];
+      const rows: TxRow[] = (Array.isArray(txs) ? txs : []).map((t) => ({
+        id: String(t.id ?? `${t.type ?? ''}|${t.date ?? ''}|${t.cost ?? t.amount ?? 0}|${t.projectId ?? ''}|${t.description ?? ''}`),
+        project_id: t.projectId ?? null,
+        type: t.type,
+        description: t.description ?? '',
+        amount: t.amount !== undefined && t.amount !== null ? Number(t.amount) : undefined,
+        unit: t.unit ?? '',
+        cost: Number(t.cost ?? t.amount ?? 0) || 0,
+        category: t.category ?? null,
+        occurred_at: String(t.date ?? new Date().toISOString()),
+        provider: t.provider ?? null,
+        rent_end_date: t.rentEndDate ?? null,
+      }));
+      setTransactions(rows);
+    };
+
+    if (useCloud && orgId && isSupabaseConfigured) {
+      try {
         const supabase = getSupabaseClient();
         const res = await supabase
           .from('transactions')
-          .select('id,project_id,type,cost,category,occurred_at')
+          .select('id,project_id,type,description,amount,unit,cost,category,occurred_at,provider,rent_end_date')
           .eq('org_id', orgId)
           .gte('occurred_at', rangeStart.toISOString())
           .lt('occurred_at', rangeEnd.toISOString())
           .order('occurred_at', { ascending: true });
         if (res.error) throw res.error;
+
         const rows: TxRow[] = (res.data ?? []).map((r: any) => ({
           id: String(r.id),
           project_id: r.project_id ?? null,
           type: r.type,
+          description: r.description ?? '',
+          amount: r.amount !== undefined && r.amount !== null ? Number(r.amount) : undefined,
+          unit: r.unit ?? '',
           cost: Number(r.cost ?? 0) || 0,
           category: r.category ?? null,
           occurred_at: String(r.occurred_at),
+          provider: r.provider ?? null,
+          rent_end_date: r.rent_end_date ?? null,
         }));
-        setTransactions(rows);
-        return;
-      }
 
-      // Local fallback
-      const raw = localStorage.getItem('transactions');
-      const txs: any[] = raw ? JSON.parse(raw) : [];
-      const rows: TxRow[] = txs.map((t) => ({
-        id: String(t.id ?? `${t.type ?? ''}|${t.date ?? ''}|${t.cost ?? t.amount ?? 0}|${t.projectId ?? ''}|${t.description ?? ''}`),
-        project_id: t.projectId ?? null,
-        type: t.type,
-        cost: Number(t.cost ?? t.amount ?? 0) || 0,
-        category: t.category ?? null,
-        occurred_at: String(t.date ?? new Date().toISOString()),
-      }));
-      setTransactions(rows);
+        setTransactions(rows);
+
+        // Cache for offline fallback (merge by id).
+        try {
+          const existing = readLocalTransactions();
+          const byId = new Map<string, any>();
+          for (const t of existing) {
+            const id = String((t as any)?.id ?? '').trim();
+            if (id) byId.set(id, t);
+          }
+          for (const r of rows) {
+            const prev = byId.get(r.id) ?? {};
+            byId.set(r.id, {
+              ...prev,
+              id: r.id,
+              projectId: r.project_id,
+              type: String(r.type || '').toUpperCase() === 'INGRESO' ? 'INGRESO' : 'GASTO',
+              description: r.description ?? '',
+              amount: r.amount ?? r.cost ?? 0,
+              unit: r.unit ?? '',
+              cost: r.cost ?? 0,
+              category: r.category ?? '',
+              date: r.occurred_at,
+              provider: r.provider ?? undefined,
+              rentEndDate: r.rent_end_date ?? undefined,
+            });
+          }
+          writeLocalTransactions(Array.from(byId.values()));
+        } catch {
+          // ignore
+        }
+
+        return;
+      } catch (e: any) {
+        console.error(e);
+        setMetricsError(e?.message || 'Sin conexión: usando cache local de transacciones');
+        try {
+          loadFromLocal();
+          return;
+        } catch {
+          setTransactions([]);
+          return;
+        }
+      }
+    }
+
+    try {
+      loadFromLocal();
     } catch (e: any) {
       console.error(e);
       setMetricsError(e?.message || 'Error cargando transacciones para gráficas');
@@ -800,9 +1199,14 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
                   id: String(rowId),
                   project_id: row?.project_id ?? null,
                   type: row?.type,
+                  description: row?.description ?? '',
+                  amount: row?.amount !== undefined && row?.amount !== null ? Number(row.amount) : undefined,
+                  unit: row?.unit ?? '',
                   cost: Number(row?.cost ?? 0) || 0,
                   category: row?.category ?? null,
                   occurred_at: String(row?.occurred_at ?? ''),
+                  provider: row?.provider ?? null,
+                  rent_end_date: row?.rent_end_date ?? null,
                 };
 
                 const range = txRangeRef.current;
@@ -1172,6 +1576,194 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
           <div className="text-gray-500 mt-4">No hay materiales presupuestados para este proyecto.</div>
         )}
       </div>
+
+      {/* Tabla interactiva de ingresos y gastos */}
+      <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
+        <h3 className="font-bold text-lg mb-3 text-navy-900">Movimientos (Ingresos / Gastos)</h3>
+        {metricsError && <div className="text-sm text-red-600 mb-3">{metricsError}</div>}
+
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="tx-from">Desde</label>
+            <input id="tx-from" type="date" className="w-full border p-2 rounded" value={txDateFrom} onChange={(e) => setTxDateFrom(e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="tx-to">Hasta</label>
+            <input id="tx-to" type="date" className="w-full border p-2 rounded" value={txDateTo} onChange={(e) => setTxDateTo(e.target.value)} />
+          </div>
+          <div>
+            <div className="block text-sm font-medium text-gray-700 mb-1">Tipo</div>
+            <div className="flex gap-4">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={txTypeIn.INGRESO}
+                  onChange={(e) => setTxTypeIn((p) => ({ ...p, INGRESO: e.target.checked }))}
+                />
+                Ingreso
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={txTypeIn.GASTO} onChange={(e) => setTxTypeIn((p) => ({ ...p, GASTO: e.target.checked }))} />
+                Gasto
+              </label>
+            </div>
+          </div>
+          <div>
+            <div className="block text-sm font-medium text-gray-700 mb-1">Categorías</div>
+            <div className="max-h-24 overflow-auto border rounded p-2">
+              {txCategoryOptions.length === 0 && <div className="text-sm text-gray-500">Sin categorías</div>}
+              {txCategoryOptions.map((c) => (
+                <label key={c} className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={txCategoriesIn.includes(c)} onChange={() => toggleTxCategory(c)} />
+                  {c}
+                </label>
+              ))}
+            </div>
+            {txCategoriesIn.length > 0 && (
+              <button className="text-xs text-blue-700 mt-1" onClick={() => setTxCategoriesIn([])} type="button">
+                Limpiar categorías
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm text-left">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="p-2">Fecha</th>
+                <th className="p-2">Proyecto</th>
+                <th className="p-2">Tipo</th>
+                <th className="p-2">Categoría</th>
+                <th className="p-2">Descripción</th>
+                <th className="p-2">Proveedor</th>
+                <th className="p-2 text-right">Monto</th>
+                <th className="p-2">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {txRowsForTable.length === 0 && (
+                <tr>
+                  <td className="p-2 text-gray-500" colSpan={8}>
+                    No hay movimientos con los filtros seleccionados.
+                  </td>
+                </tr>
+              )}
+
+              {txRowsForTable.map((t) => {
+                const isEditing = editingTxId === t.id;
+                const dateLabel = (() => {
+                  const d = new Date(t.occurred_at);
+                  if (Number.isNaN(d.getTime())) return '';
+                  return d.toISOString().slice(0, 10);
+                })();
+                const typeLabel = String(t.type || '').toUpperCase() === 'INGRESO' ? 'INGRESO' : 'GASTO';
+
+                if (isEditing) {
+                  return (
+                    <tr key={t.id} className="border-t">
+                      <td className="p-2">
+                        <input
+                          type="date"
+                          className="border p-1 rounded"
+                          title="Fecha"
+                          value={editTxDraft.date}
+                          onChange={(e) => setEditTxDraft((p) => ({ ...p, date: e.target.value }))}
+                        />
+                      </td>
+                      <td className="p-2">{t.project_id ? projectNameById.get(String(t.project_id)) ?? t.project_id : '—'}</td>
+                      <td className="p-2">
+                        <select
+                          className="border p-1 rounded"
+                          title="Tipo"
+                          value={editTxDraft.type}
+                          onChange={(e) => setEditTxDraft((p) => ({ ...p, type: e.target.value as any }))}
+                        >
+                          <option value="INGRESO">INGRESO</option>
+                          <option value="GASTO">GASTO</option>
+                        </select>
+                      </td>
+                      <td className="p-2">
+                        <input
+                          className="border p-1 rounded w-full"
+                          title="Categoría"
+                          value={editTxDraft.category}
+                          onChange={(e) => setEditTxDraft((p) => ({ ...p, category: e.target.value }))}
+                        />
+                      </td>
+                      <td className="p-2">
+                        <input
+                          className="border p-1 rounded w-full"
+                          title="Descripción"
+                          value={editTxDraft.description}
+                          onChange={(e) => setEditTxDraft((p) => ({ ...p, description: e.target.value }))}
+                        />
+                      </td>
+                      <td className="p-2">
+                        <input
+                          className="border p-1 rounded w-full"
+                          title="Proveedor"
+                          value={editTxDraft.provider}
+                          onChange={(e) => setEditTxDraft((p) => ({ ...p, provider: e.target.value }))}
+                        />
+                      </td>
+                      <td className="p-2 text-right">
+                        <input
+                          className="border p-1 rounded w-28 text-right"
+                          title="Monto"
+                          value={editTxDraft.cost}
+                          onChange={(e) => setEditTxDraft((p) => ({ ...p, cost: e.target.value }))}
+                        />
+                      </td>
+                      <td className="p-2">
+                        <div className="flex gap-2">
+                          <button className="px-3 py-1 bg-navy-900 text-white rounded" type="button" onClick={submitEditTx}>
+                            Guardar
+                          </button>
+                          <button className="px-3 py-1 bg-white border border-gray-300 rounded" type="button" onClick={cancelEditTx}>
+                            Cancelar
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                }
+
+                return (
+                  <tr key={t.id} className="border-t">
+                    <td className="p-2">{dateLabel}</td>
+                    <td className="p-2">{t.project_id ? projectNameById.get(String(t.project_id)) ?? t.project_id : '—'}</td>
+                    <td className="p-2">{typeLabel}</td>
+                    <td className="p-2">{String(t.category ?? '')}</td>
+                    <td className="p-2">{String(t.description ?? '')}</td>
+                    <td className="p-2">{String(t.provider ?? '')}</td>
+                    <td className="p-2 text-right">{currency.format(Number(t.cost ?? 0) || 0)}</td>
+                    <td className="p-2">
+                      <div className="flex gap-2">
+                        <button className="px-3 py-1 bg-white border border-gray-300 rounded" type="button" onClick={() => beginEditTx(t)}>
+                          Editar
+                        </button>
+                        <button
+                          className="px-3 py-1 bg-white border border-gray-300 rounded text-red-700"
+                          type="button"
+                          onClick={async () => {
+                            const ok = window.confirm('¿Eliminar este movimiento?');
+                            if (!ok) return;
+                            await removeTransaction(t.id);
+                          }}
+                        >
+                          Eliminar
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           <div className="flex flex-col sm:flex-row sm:items-center gap-3">

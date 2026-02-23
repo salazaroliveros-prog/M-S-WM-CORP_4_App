@@ -2,7 +2,6 @@
 -- Date: 2026-02-04
 
 begin;
-
 -- One editable progress record per project
 create table if not exists public.project_progress (
   id uuid primary key default gen_random_uuid(),
@@ -18,15 +17,12 @@ create table if not exists public.project_progress (
   constraint project_progress_project_fk foreign key (project_id, org_id)
     references public.projects(id, org_id) on delete cascade
 );
-
 create index if not exists project_progress_org_project_idx on public.project_progress(org_id, project_id);
-
 drop trigger if exists project_progress_set_updated_at on public.project_progress;
 create trigger project_progress_set_updated_at
 before update on public.project_progress
 for each row
 execute function app.tg_set_updated_at();
-
 -- Progress lines are persisted by line name (budget line IDs are not stable)
 create table if not exists public.project_progress_lines (
   id uuid primary key default gen_random_uuid(),
@@ -47,19 +43,15 @@ create table if not exists public.project_progress_lines (
   constraint project_progress_lines_progress_fk foreign key (progress_id, org_id)
     references public.project_progress(id, org_id) on delete cascade
 );
-
 create index if not exists project_progress_lines_org_progress_idx on public.project_progress_lines(org_id, progress_id);
-
 drop trigger if exists project_progress_lines_set_updated_at on public.project_progress_lines;
 create trigger project_progress_lines_set_updated_at
 before update on public.project_progress_lines
 for each row
 execute function app.tg_set_updated_at();
-
 -- RLS
 alter table public.project_progress enable row level security;
 alter table public.project_progress_lines enable row level security;
-
 drop policy if exists project_progress_crud on public.project_progress;
 create policy project_progress_crud
 on public.project_progress
@@ -67,7 +59,6 @@ for all
 to authenticated
 using (app.is_org_member(org_id))
 with check (app.is_org_member(org_id));
-
 drop policy if exists project_progress_lines_crud on public.project_progress_lines;
 create policy project_progress_lines_crud
 on public.project_progress_lines
@@ -75,5 +66,4 @@ for all
 to authenticated
 using (app.is_org_member(org_id))
 with check (app.is_org_member(org_id));
-
 commit;

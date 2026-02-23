@@ -4,7 +4,6 @@
 -- and only adds tables that exist and are missing from the publication.
 
 begin;
-
 do $$
 declare
   pub_name text := 'supabase_realtime';
@@ -79,5 +78,4 @@ begin
     end if;
   end loop;
 end $$;
-
 commit;

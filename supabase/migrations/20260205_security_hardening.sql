@@ -7,7 +7,6 @@
 -- - Reduce risk of backdated attendance submissions from token-only flow
 
 begin;
-
 -- -----------------------------------------------------------------------------
 -- Attendance token registry: admin-only
 -- -----------------------------------------------------------------------------
@@ -19,7 +18,6 @@ for all
 to authenticated
 using (app.is_org_admin(org_id))
 with check (app.is_org_admin(org_id));
-
 create or replace function app.set_employee_attendance_token(p_employee_id uuid, p_token text)
 returns void
 language plpgsql
@@ -55,7 +53,6 @@ begin
   do update set token_hash = excluded.token_hash, is_active = true, updated_at = now();
 end;
 $$;
-
 -- Tighten token-only attendance submission.
 -- IMPORTANT: keep the biometric enforcement from 20260204_attendance_require_biometric.sql.
 create or replace function app.submit_attendance_with_token(
@@ -194,7 +191,6 @@ begin
   return v_row;
 end;
 $$;
-
 -- -----------------------------------------------------------------------------
 -- WebAuthn credentials: admin-only
 -- -----------------------------------------------------------------------------
@@ -206,5 +202,4 @@ for all
 to authenticated
 using (app.is_org_admin(org_id))
 with check (app.is_org_admin(org_id));
-
 commit;

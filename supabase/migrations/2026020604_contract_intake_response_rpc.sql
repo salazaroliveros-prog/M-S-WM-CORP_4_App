@@ -12,7 +12,6 @@
 -- Date: 2026-02-06
 
 begin;
-
 create or replace function public.submit_employee_contract_response(
   p_request_id uuid,
   p_response jsonb
@@ -89,8 +88,6 @@ begin
   return v_row;
 end;
 $$;
-
 revoke all on function public.submit_employee_contract_response(uuid, jsonb) from public;
 grant execute on function public.submit_employee_contract_response(uuid, jsonb) to anon, authenticated;
-
 commit;

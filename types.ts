@@ -1,4 +1,15 @@
-export type ViewState = 'WELCOME' | 'DASHBOARD' | 'INICIO' | 'PROYECTOS' | 'PRESUPUESTOS' | 'SEGUIMIENTO' | 'COMPRAS' | 'RRHH' | 'COTIZADOR' | 'DIAGNOSTICO';
+export type ViewState =
+  | 'WELCOME'
+  | 'DASHBOARD'
+  | 'INICIO'
+  | 'PROYECTOS'
+  | 'PRESUPUESTOS'
+  | 'SEGUIMIENTO'
+  | 'COMPRAS'
+  | 'RRHH'
+  | 'COTIZADOR'
+  | 'NOTIFICACIONES'
+  | 'DIAGNOSTICO';
 
 export interface Project {
   id: string;

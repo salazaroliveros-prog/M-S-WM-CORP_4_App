@@ -2,7 +2,6 @@
 -- Date: 2026-02-04
 
 begin;
-
 create table if not exists public.employee_contracts (
   id uuid primary key default gen_random_uuid(),
   org_id uuid not null references public.organizations(id) on delete cascade,
@@ -36,19 +35,15 @@ create table if not exists public.employee_contracts (
   constraint employee_contracts_project_fk foreign key (project_id, org_id)
     references public.projects(id, org_id) on delete set null
 );
-
 create index if not exists employee_contracts_org_requested_idx on public.employee_contracts(org_id, requested_at);
 create index if not exists employee_contracts_org_employee_idx on public.employee_contracts(org_id, employee_id);
 create index if not exists employee_contracts_org_project_idx on public.employee_contracts(org_id, project_id);
-
 drop trigger if exists employee_contracts_set_updated_at on public.employee_contracts;
 create trigger employee_contracts_set_updated_at
 before update on public.employee_contracts
 for each row
 execute function app.tg_set_updated_at();
-
 alter table public.employee_contracts enable row level security;
-
 drop policy if exists employee_contracts_crud on public.employee_contracts;
 create policy employee_contracts_crud
 on public.employee_contracts
@@ -56,5 +51,4 @@ for all
 to authenticated
 using (app.is_org_member(org_id))
 with check (app.is_org_member(org_id));
-
 commit;

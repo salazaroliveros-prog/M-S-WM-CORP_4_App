@@ -19,6 +19,7 @@ interface Props {
   onUpdateRequisitionStatus?: (requisitionId: string, status: 'sent' | 'confirmed' | 'received' | 'cancelled') => Promise<void>;
   onListRequisitionItems?: (requisitionId: string) => Promise<Array<{ id: string; name: string; unit: string; quantity: number; unitPrice: number | null; actualUnitCost: number | null }> | null>;
   onSaveRequisitionActualCosts?: (requisitionId: string, updates: Array<{ id: string; actualUnitCost: number | null }>) => Promise<void>;
+  onSaveRequisitionUnitPrices?: (requisitionId: string, updates: Array<{ id: string; unitPrice: number | null }>) => Promise<void>;
   canApproveRequisitions?: boolean;
   onListSuppliers?: () => Promise<Array<{ id: string; name: string; whatsapp?: string | null; phone?: string | null; defaultNoteTemplate?: string | null; termsTemplate?: string | null }> | null>;
   onUpsertSupplier?: (input: { id?: string | null; name: string; whatsapp?: string | null; phone?: string | null; defaultNoteTemplate?: string | null; termsTemplate?: string | null }) => Promise<{ id: string } | null>;
@@ -163,6 +164,7 @@ const Compras: React.FC<Props> = ({
   onUpdateRequisitionStatus,
   onListRequisitionItems,
   onSaveRequisitionActualCosts,
+  onSaveRequisitionUnitPrices,
   canApproveRequisitions,
   onListSuppliers,
   onUpsertSupplier,
@@ -448,6 +450,13 @@ const Compras: React.FC<Props> = ({
   const [invoiceError, setInvoiceError] = useState<string | null>(null);
   const [invoiceSaving, setInvoiceSaving] = useState(false);
 
+  const [isQuoteModalOpen, setIsQuoteModalOpen] = useState(false);
+  const [quoteReqId, setQuoteReqId] = useState<string | null>(null);
+  const [quoteItems, setQuoteItems] = useState<Array<{ id: string; name: string; unit: string; quantity: number; unitPrice: number | null; actualUnitCost: number | null }>>([]);
+  const [quoteDraftPrices, setQuoteDraftPrices] = useState<Record<string, string>>({});
+  const [quoteError, setQuoteError] = useState<string | null>(null);
+  const [quoteSaving, setQuoteSaving] = useState(false);
+
   const statusLabel = (s: string) => {
     const v = String(s || '').toLowerCase();
     if (v === 'draft') return 'BORRADOR';
@@ -495,6 +504,89 @@ const Compras: React.FC<Props> = ({
       setInvoiceDraftCosts(initial);
     } catch (e: any) {
       setInvoiceError(e?.message || 'No se pudieron cargar los items.');
+    }
+  };
+
+  const openQuoteModal = async (requisitionId: string) => {
+    if (!onListRequisitionItems) {
+      alert('No disponible: cargar items de requisición.');
+      return;
+    }
+    if (!onSaveRequisitionUnitPrices) {
+      alert('No disponible: guardar precios del proveedor.');
+      return;
+    }
+
+    setQuoteError(null);
+    setQuoteReqId(requisitionId);
+    setIsQuoteModalOpen(true);
+    setQuoteItems([]);
+    setQuoteDraftPrices({});
+
+    try {
+      const items = await onListRequisitionItems(requisitionId);
+      const safe = Array.isArray(items) ? items : [];
+      setQuoteItems(safe);
+      const initial: Record<string, string> = {};
+      for (const it of safe) {
+        if (!it?.id) continue;
+        initial[String(it.id)] = it.unitPrice === null || it.unitPrice === undefined ? '' : String(it.unitPrice);
+      }
+      setQuoteDraftPrices(initial);
+    } catch (e: any) {
+      setQuoteError(e?.message || 'No se pudieron cargar los items.');
+    }
+  };
+
+  const saveQuoteAndAccept = async () => {
+    if (!quoteReqId) return;
+    if (!onSaveRequisitionUnitPrices) {
+      alert('No disponible: guardar precios del proveedor.');
+      return;
+    }
+
+    setQuoteSaving(true);
+    setQuoteError(null);
+    try {
+      const updates = quoteItems.map((it) => {
+        const raw = String(quoteDraftPrices[String(it.id)] ?? '').trim();
+        if (!raw) return { id: it.id, unitPrice: null };
+        const n = Number(raw);
+        return { id: it.id, unitPrice: Number.isFinite(n) ? Math.max(0, n) : null };
+      });
+
+      const missing = updates.some((u) => u.unitPrice === null || u.unitPrice === undefined || !(Number(u.unitPrice) > 0));
+      if (missing) {
+        setQuoteError('Ingrese el precio unitario (P.U.) para todos los ítems antes de aceptar.');
+        return;
+      }
+
+      await onSaveRequisitionUnitPrices(quoteReqId, updates);
+      await handleStatusAction(quoteReqId, 'confirmed');
+
+      setIsQuoteModalOpen(false);
+      setQuoteReqId(null);
+      setQuoteItems([]);
+      setQuoteDraftPrices({});
+      setQuoteError(null);
+    } catch (e: any) {
+      setQuoteError(e?.message || 'No se pudo guardar la cotización.');
+    } finally {
+      setQuoteSaving(false);
+    }
+  };
+
+  const rejectQuote = async () => {
+    if (!quoteReqId) return;
+    try {
+      await handleStatusAction(quoteReqId, 'cancelled');
+      setIsQuoteModalOpen(false);
+      setQuoteReqId(null);
+      setQuoteItems([]);
+      setQuoteDraftPrices({});
+      setQuoteError(null);
+    } catch {
+      // errors are handled in handleStatusAction
     }
   };
 
@@ -1164,14 +1256,14 @@ const Compras: React.FC<Props> = ({
                     {onUpdateRequisitionStatus && (
                       <td className="p-3">
                         <div className="flex flex-wrap gap-2">
-                          {(String(h.status).toLowerCase() === 'sent' && canApproveRequisitions) && (
+                          {(String(h.status).toLowerCase() === 'sent' && !!onUpdateRequisitionStatus && !!onSaveRequisitionUnitPrices && (canApproveRequisitions ?? true)) && (
                             <button
                               type="button"
-                              onClick={() => handleStatusAction(h.id, 'confirmed')}
+                              onClick={() => openQuoteModal(h.id)}
                               className="text-xs px-3 py-1 rounded bg-gray-200 hover:bg-gray-300"
-                              title="Aprobar requisición"
+                              title="Revisar precios del proveedor y aceptar/rechazar"
                             >
-                              Aprobar
+                              Cotización / Aceptar
                             </button>
                           )}
                           {canApproveRequisitions && (
@@ -1404,6 +1496,127 @@ const Compras: React.FC<Props> = ({
                   title="Guardar costos reales y marcar como recibido"
                 >
                   {invoiceSaving ? 'Guardando…' : 'Guardar y marcar RECIBIDO'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isQuoteModalOpen && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" role="dialog" aria-modal="true" aria-label="Cotización del proveedor">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl">
+            <div className="flex items-center justify-between p-4 border-b">
+              <div>
+                <div className="font-bold text-navy-900">Cotización del proveedor</div>
+                <div className="text-xs text-gray-500">Ingrese el precio unitario (P.U.) por material y luego Acepte o Rechace.</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (quoteSaving) return;
+                  setIsQuoteModalOpen(false);
+                  setQuoteReqId(null);
+                  setQuoteItems([]);
+                  setQuoteDraftPrices({});
+                  setQuoteError(null);
+                }}
+                className="p-2 rounded hover:bg-gray-100"
+                aria-label="Cerrar"
+                title="Cerrar"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-4">
+              {quoteError && (
+                <div className="mb-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2">
+                  {quoteError}
+                </div>
+              )}
+
+              {quoteItems.length === 0 ? (
+                <div className="text-sm text-gray-500">No hay items para esta requisición (o no se pudieron cargar).</div>
+              ) : (
+                <div className="overflow-auto border rounded">
+                  <table className="w-full text-sm text-left">
+                    <thead className="bg-gray-50 sticky top-0">
+                      <tr>
+                        <th className="p-2">Material</th>
+                        <th className="p-2">Unidad</th>
+                        <th className="p-2 text-right">Cantidad</th>
+                        <th className="p-2 text-right">P.U. (cotizado)</th>
+                        <th className="p-2 text-right">Subtotal</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {quoteItems.map((it) => {
+                        const raw = String(quoteDraftPrices[String(it.id)] ?? '').trim();
+                        const pu = raw ? Number(raw) : NaN;
+                        const qty = Number(it.quantity) || 0;
+                        const subtotal = Number.isFinite(pu) && pu > 0 ? qty * pu : null;
+                        return (
+                          <tr key={it.id} className="border-t">
+                            <td className="p-2 font-medium text-navy-900">{it.name}</td>
+                            <td className="p-2 text-gray-600">{it.unit}</td>
+                            <td className="p-2 text-right font-mono">{formatQty(Number(it.quantity) || 0)}</td>
+                            <td className="p-2 text-right">
+                              <input
+                                type="number"
+                                min={0}
+                                step="0.01"
+                                value={quoteDraftPrices[String(it.id)] ?? ''}
+                                onChange={(e) => setQuoteDraftPrices((prev) => ({ ...prev, [String(it.id)]: e.target.value }))}
+                                className="w-28 p-2 border rounded text-right focus:ring-mustard-500 focus:border-mustard-500"
+                                placeholder="0.00"
+                                aria-label={`Precio unitario: ${it.name}`}
+                                title="Precio unitario (cotizado)"
+                              />
+                            </td>
+                            <td className="p-2 text-right font-mono">
+                              {subtotal === null ? '—' : `Q${subtotal.toFixed(2)}`}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              <div className="mt-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={quoteSaving}
+                  onClick={() => {
+                    setIsQuoteModalOpen(false);
+                    setQuoteReqId(null);
+                    setQuoteItems([]);
+                    setQuoteDraftPrices({});
+                    setQuoteError(null);
+                  }}
+                  className="px-4 py-2 rounded border hover:bg-gray-50 text-sm"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={quoteSaving}
+                  onClick={rejectQuote}
+                  className="px-4 py-2 rounded bg-white border hover:bg-gray-50 text-sm font-semibold"
+                  title="Rechazar requisición"
+                >
+                  Rechazar
+                </button>
+                <button
+                  type="button"
+                  disabled={quoteSaving}
+                  onClick={saveQuoteAndAccept}
+                  className="px-4 py-2 rounded bg-gray-200 hover:bg-gray-300 text-sm font-semibold"
+                  title="Guardar cotización y marcar como APROBADO"
+                >
+                  {quoteSaving ? 'Guardando…' : 'Aceptar (APROBADO)'}
                 </button>
               </div>
             </div>

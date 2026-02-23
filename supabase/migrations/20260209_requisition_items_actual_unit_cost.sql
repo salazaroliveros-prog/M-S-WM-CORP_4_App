@@ -4,7 +4,6 @@
 alter table public.requisition_items
   add column if not exists actual_unit_cost numeric(14,2)
   check (actual_unit_cost is null or actual_unit_cost >= 0);
-
 -- 2) Protect item details after leaving draft (but allow unit prices updates)
 create or replace function app.tg_requisition_items_guard_after_draft()
 returns trigger
@@ -36,13 +35,11 @@ begin
   return new;
 end;
 $$;
-
 drop trigger if exists requisition_items_guard_after_draft on public.requisition_items;
 create trigger requisition_items_guard_after_draft
 before update on public.requisition_items
 for each row
 execute function app.tg_requisition_items_guard_after_draft();
-
 -- 3) Allow org admins to update requisition items in any status (creator still limited to draft)
 --    NOTE: This keeps tight control via the guard trigger above.
 drop policy if exists requisition_items_update on public.requisition_items;
@@ -76,7 +73,6 @@ with check (
       )
   )
 );
-
 -- 4) Extend totals view with real (actual) total amount; keep existing column names for compatibility
 create or replace view public.v_requisition_totals as
 select

@@ -23,16 +23,13 @@ create table if not exists public.material_catalog_items (
   constraint material_catalog_items_id_org_unique unique (id, org_id),
   constraint material_catalog_items_org_name_unit_unique unique (org_id, name_norm, unit)
 );
-
 create index if not exists material_catalog_items_org_name_idx on public.material_catalog_items(org_id, lower(name));
 create index if not exists material_catalog_items_org_norm_idx on public.material_catalog_items(org_id, name_norm);
-
 drop trigger if exists material_catalog_items_set_updated_at on public.material_catalog_items;
 create trigger material_catalog_items_set_updated_at
 before update on public.material_catalog_items
 for each row
 execute function app.tg_set_updated_at();
-
 -- -----------------------------------------------------------------------------
 -- Material price quotes (versioned)
 -- -----------------------------------------------------------------------------
@@ -60,15 +57,12 @@ create table if not exists public.material_price_quotes (
     references public.material_catalog_items(id, org_id) on delete cascade,
   constraint material_price_quotes_unique unique (material_id, org_id, vendor, price_date)
 );
-
 create index if not exists material_price_quotes_material_date_idx on public.material_price_quotes(org_id, material_id, price_date desc);
-
 drop trigger if exists material_price_quotes_set_updated_at on public.material_price_quotes;
 create trigger material_price_quotes_set_updated_at
 before update on public.material_price_quotes
 for each row
 execute function app.tg_set_updated_at();
-
 -- Latest price per material (by date then updated_at)
 create or replace view public.v_material_latest_prices as
 select distinct on (q.org_id, q.material_id)
@@ -82,7 +76,6 @@ select distinct on (q.org_id, q.material_id)
   q.updated_at
 from public.material_price_quotes q
 order by q.org_id, q.material_id, q.price_date desc, q.updated_at desc;
-
 -- -----------------------------------------------------------------------------
 -- APU templates (unit costs + materials + meta for yields/rendimientos)
 -- -----------------------------------------------------------------------------
@@ -118,17 +111,14 @@ create table if not exists public.apu_templates (
   constraint apu_templates_id_org_unique unique (id, org_id),
   constraint apu_templates_org_typology_name_unique unique (org_id, typology, name_norm)
 );
-
 create index if not exists apu_templates_org_typology_idx on public.apu_templates(org_id, typology);
 create index if not exists apu_templates_org_norm_idx on public.apu_templates(org_id, typology, name_norm);
 create index if not exists apu_templates_org_name_idx on public.apu_templates(org_id, typology, lower(name));
-
 drop trigger if exists apu_templates_set_updated_at on public.apu_templates;
 create trigger apu_templates_set_updated_at
 before update on public.apu_templates
 for each row
 execute function app.tg_set_updated_at();
-
 -- -----------------------------------------------------------------------------
 -- RLS
 -- -----------------------------------------------------------------------------
@@ -136,47 +126,40 @@ execute function app.tg_set_updated_at();
 alter table public.material_catalog_items enable row level security;
 alter table public.material_price_quotes enable row level security;
 alter table public.apu_templates enable row level security;
-
 -- material_catalog_items
 drop policy if exists material_catalog_items_select on public.material_catalog_items;
 create policy material_catalog_items_select
 on public.material_catalog_items
 for select
 using (app.is_org_member(org_id));
-
 drop policy if exists material_catalog_items_write on public.material_catalog_items;
 create policy material_catalog_items_write
 on public.material_catalog_items
 for all
 using (app.is_org_member(org_id))
 with check (app.is_org_member(org_id));
-
 -- material_price_quotes
 drop policy if exists material_price_quotes_select on public.material_price_quotes;
 create policy material_price_quotes_select
 on public.material_price_quotes
 for select
 using (app.is_org_member(org_id));
-
 drop policy if exists material_price_quotes_write on public.material_price_quotes;
 create policy material_price_quotes_write
 on public.material_price_quotes
 for all
 using (app.is_org_member(org_id))
 with check (app.is_org_member(org_id));
-
 -- apu_templates
 drop policy if exists apu_templates_select on public.apu_templates;
 create policy apu_templates_select
 on public.apu_templates
 for select
 using (app.is_org_member(org_id));
-
 drop policy if exists apu_templates_write on public.apu_templates;
 create policy apu_templates_write
 on public.apu_templates
 for all
 using (app.is_org_member(org_id))
 with check (app.is_org_member(org_id));
-
 commit;

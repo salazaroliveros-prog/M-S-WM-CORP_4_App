@@ -4,7 +4,6 @@
 -- same logic but wrapping auth.uid() as (select auth.uid()).
 
 begin;
-
 -- -----------------------------------------------------------------------------
 -- Organizations / org_members bootstrap policies (from scripts/fix_org_insert_policy.sql)
 -- -----------------------------------------------------------------------------
@@ -18,7 +17,6 @@ using (
   app.is_org_member(id)
   or created_by = (select auth.uid())
 );
-
 drop policy if exists organizations_insert on public.organizations;
 create policy organizations_insert
 on public.organizations
@@ -27,7 +25,6 @@ to anon, authenticated
 with check (
   created_by = (select auth.uid())
 );
-
 -- org_members: select
 
 drop policy if exists org_members_select on public.org_members;
@@ -45,7 +42,6 @@ using (
       and o.created_by = (select auth.uid())
   )
 );
-
 -- org_members: insert
 
 drop policy if exists org_members_insert on public.org_members;
@@ -69,7 +65,6 @@ with check (
       and o.created_by = (select auth.uid())
   )
 );
-
 -- -----------------------------------------------------------------------------
 -- Audit logs
 -- -----------------------------------------------------------------------------
@@ -83,7 +78,6 @@ with check (
   app.is_org_member(org_id)
   and actor_user_id = (select auth.uid())
 );
-
 -- -----------------------------------------------------------------------------
 -- Requisitions + requisition_items (purchases approvals)
 -- -----------------------------------------------------------------------------
@@ -107,8 +101,6 @@ with check (
     and status in ('draft', 'sent', 'cancelled')
   )
 );
-
-
 drop policy if exists requisitions_delete on public.requisitions;
 create policy requisitions_delete
 on public.requisitions
@@ -121,7 +113,6 @@ using (
     and status in ('draft', 'sent', 'cancelled')
   )
 );
-
 -- requisition_items policies (select/insert defined in previous migration
 -- without auth.uid(); we only need to override the ones that reference it)
 
@@ -145,7 +136,6 @@ with check (
       )
   )
 );
-
 -- Update (definition from 20260209_requisition_items_actual_unit_cost.sql,
 -- but with auth.uid() wrapped)
 
@@ -180,7 +170,6 @@ with check (
       )
   )
 );
-
 -- Delete
 
 drop policy if exists requisition_items_delete on public.requisition_items;
@@ -201,7 +190,6 @@ using (
       )
   )
 );
-
 -- -----------------------------------------------------------------------------
 -- Chat (messages / threads)
 -- -----------------------------------------------------------------------------
@@ -261,7 +249,6 @@ BEGIN
   END IF;
 END;
 $$;
-
 DO $$
 BEGIN
   IF to_regclass('public.threads') IS NOT NULL THEN
@@ -317,7 +304,6 @@ BEGIN
   END IF;
 END;
 $$;
-
 -- -----------------------------------------------------------------------------
 -- perfiles / trabajadores (self-profile policies)
 -- -----------------------------------------------------------------------------
@@ -343,7 +329,6 @@ BEGIN
   END IF;
 END;
 $$;
-
 DO $$
 BEGIN
   IF to_regclass('public.trabajadores') IS NOT NULL THEN
@@ -359,7 +344,6 @@ BEGIN
   END IF;
 END;
 $$;
-
 -- -----------------------------------------------------------------------------
 -- Material catalog / price quotes (org-based admin policies)
 -- -----------------------------------------------------------------------------
@@ -427,5 +411,4 @@ BEGIN
   END IF;
 END;
 $$;
-
 commit;

@@ -17,6 +17,19 @@ const Inicio: React.FC<Props> = ({ projects, onViewChange, onCreateTransaction }
   const [amount, setAmount] = useState('');
   const [unit, setUnit] = useState('Quetzal');
   const [category, setCategory] = useState('');
+
+  const todayYmd = useState(() => new Date().toISOString().slice(0, 10))[0];
+  const [txDate, setTxDate] = useState<string>(todayYmd);
+
+  const monthLabel = useState(() => {
+    try {
+      const d = new Date(`${todayYmd}T12:00:00`);
+      const m = d.toLocaleString('es-GT', { month: 'long' });
+      return m.charAt(0).toUpperCase() + m.slice(1);
+    } catch {
+      return '';
+    }
+  })[0];
   
   // Specific for Expense
   const [provider, setProvider] = useState('');
@@ -38,6 +51,13 @@ const Inicio: React.FC<Props> = ({ projects, onViewChange, onCreateTransaction }
     if (!category.trim()) return alert('Seleccione una categoría');
     
     // In a real app, this would dispatch to context or API
+    const occurredAtIso = (() => {
+      const raw = String(txDate || '').trim();
+      if (!raw) return new Date().toISOString();
+      const d = new Date(`${raw}T12:00:00`);
+      return Number.isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+    })();
+
     const newTransaction: Transaction = {
       id: crypto.randomUUID(),
       projectId: selectedProject,
@@ -47,7 +67,7 @@ const Inicio: React.FC<Props> = ({ projects, onViewChange, onCreateTransaction }
       unit,
       cost: amt, // simplified logic
       category: category.trim(),
-      date: new Date().toISOString(),
+      date: occurredAtIso,
       provider: activeTab === 'GASTO' ? (provider.trim() || undefined) : undefined,
       rentEndDate: rentEnd || undefined
     };
@@ -119,6 +139,36 @@ const Inicio: React.FC<Props> = ({ projects, onViewChange, onCreateTransaction }
       {/* Form Area */}
       <div className="bg-white p-6 rounded-xl shadow-md border border-gray-100 animate-fade-in w-full max-w-2xl mx-auto">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="w-full">
+            <label htmlFor="inicio-date" className="block text-sm font-semibold text-gray-700">Fecha</label>
+            <input
+              id="inicio-date"
+              type="date"
+              value={txDate}
+              onChange={e => setTxDate(e.target.value)}
+              className="mt-1 w-full p-3 border rounded-lg"
+              title="Fecha"
+            />
+          </div>
+
+          <div className="w-full">
+            <label className="block text-sm font-semibold text-gray-700">Mes</label>
+            <div className="mt-1 w-full p-3 border rounded-lg bg-gray-50 text-gray-700" title="Mes en letras">
+              {(() => {
+                try {
+                  const raw = String(txDate || '').trim();
+                  if (!raw) return monthLabel;
+                  const d = new Date(`${raw}T12:00:00`);
+                  if (Number.isNaN(d.getTime())) return monthLabel;
+                  const m = d.toLocaleString('es-GT', { month: 'long' });
+                  return m.charAt(0).toUpperCase() + m.slice(1);
+                } catch {
+                  return monthLabel;
+                }
+              })()}
+            </div>
+          </div>
+
           <div className="sm:col-span-2">
              <label htmlFor="inicio-desc" className="block text-sm font-semibold text-gray-700">Descripción</label>
              <input id="inicio-desc" type="text" value={description} onChange={e => setDescription(e.target.value)} className="mt-1 w-full p-3 border rounded-lg" placeholder={activeTab === 'INGRESO' ? "Ej: Pago inicial cliente" : "Ej: Compra de cemento"} />
@@ -137,9 +187,17 @@ const Inicio: React.FC<Props> = ({ projects, onViewChange, onCreateTransaction }
                  <>
                   <option>m3</option>
                   <option>m2</option>
+                  <option>ml</option>
                   <option>Saco</option>
+                  <option>Libra</option>
                   <option>Varilla</option>
+                  <option>Quintal</option>
+                  <option>Unidad</option>
+                  <option>Global</option>
+                  <option>Pie tabla</option>
+                  <option>Litro</option>
                   <option>Viaje</option>
+                  <option>Camión 10m3</option>
                   <option>Hora</option>
                  </>
                )}

@@ -66,6 +66,39 @@ En PowerShell:
 
 `$env:SUPABASE_REQUIRE_REALTIME='true'; npm run test:supabase`
 
+### Notificaciones Push (PWA) (opcional, real)
+
+La app soporta **Web Push real** (notificaciones cuando la app está cerrada), usando:
+
+- Service Worker (PWA) con handler `push` en [src/sw.ts](src/sw.ts)
+- Suscripciones por dispositivo en `public.push_subscriptions` (ver migración [supabase/migrations/2026022301_push_subscriptions.sql](supabase/migrations/2026022301_push_subscriptions.sql))
+- Edge Function `push` en [supabase/functions/push/index.ts](supabase/functions/push/index.ts)
+
+Pasos (resumen):
+
+1) Generar VAPID keys (ejemplo con Node):
+`npx web-push generate-vapid-keys`
+
+2) En el **frontend** (build time), definir la public key:
+- `VITE_WEB_PUSH_PUBLIC_KEY=<PUBLIC_KEY>`
+
+3) En Supabase (secrets/variables de funciones), definir:
+- `WEB_PUSH_VAPID_PUBLIC_KEY=<PUBLIC_KEY>`
+- `WEB_PUSH_VAPID_PRIVATE_KEY=<PRIVATE_KEY>`
+- `WEB_PUSH_SUBJECT=mailto:admin@tu-dominio.com`
+
+4) Aplicar migración SQL:
+- Ejecuta la migración [supabase/migrations/2026022301_push_subscriptions.sql](supabase/migrations/2026022301_push_subscriptions.sql)
+
+5) Desplegar la función `push` en Supabase:
+- `supabase functions deploy push`
+
+Notas:
+
+- Push requiere HTTPS (o localhost).
+- La UI para activar push está en **Notificaciones** (modo nube).
+- La app intenta enviar push de forma “best-effort” al crear notificaciones en la nube (si la función no está desplegada, no bloquea el flujo).
+
 ## Validación de datos y Realtime (app)
 
 La app incluye un panel **Diagnóstico Supabase** que valida:

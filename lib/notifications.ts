@@ -1,5 +1,39 @@
 import { getSupabaseClient } from './supabaseClient';
 
+export async function createNotification(input: {
+  orgId: string;
+  employeeId?: string | null;
+  type: string;
+  message: string;
+}) {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase
+    .from('notifications')
+    .insert([
+      {
+        org_id: input.orgId,
+        employee_id: input.employeeId ?? null,
+        type: input.type,
+        message: input.message,
+      },
+    ]);
+  if (error) throw error;
+
+  // Best-effort push notification (does not fail the main flow)
+  try {
+    await supabase.functions.invoke('push', {
+      body: {
+        orgId: input.orgId,
+        title: 'Notificación',
+        body: input.message,
+        data: { type: input.type },
+      },
+    });
+  } catch {
+    // ignore
+  }
+}
+
 export async function notifyAttendance(orgId: string, employeeId: string, message: string) {
   const supabase = getSupabaseClient();
   const { error } = await supabase
@@ -13,6 +47,19 @@ export async function notifyAttendance(orgId: string, employeeId: string, messag
       }
     ]);
   if (error) throw error;
+
+  try {
+    await supabase.functions.invoke('push', {
+      body: {
+        orgId,
+        title: 'Asistencia',
+        body: message,
+        data: { type: 'asistencia' },
+      },
+    });
+  } catch {
+    // ignore
+  }
 }
 
 export async function markNotificationAsRead(notificationId: string) {

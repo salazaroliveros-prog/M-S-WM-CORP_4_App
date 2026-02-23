@@ -2,7 +2,6 @@
 -- Date: 2026-02-04
 
 begin;
-
 -- Token registry per employee for public check-in links (hashed tokens)
 create table if not exists public.employee_attendance_tokens (
   id uuid primary key default gen_random_uuid(),
@@ -21,17 +20,13 @@ create table if not exists public.employee_attendance_tokens (
   constraint employee_attendance_tokens_employee_fk foreign key (employee_id, org_id)
     references public.employees(id, org_id) on delete cascade
 );
-
 create index if not exists employee_attendance_tokens_org_hash_idx on public.employee_attendance_tokens(org_id, token_hash);
-
 drop trigger if exists employee_attendance_tokens_set_updated_at on public.employee_attendance_tokens;
 create trigger employee_attendance_tokens_set_updated_at
 before update on public.employee_attendance_tokens
 for each row
 execute function app.tg_set_updated_at();
-
 alter table public.employee_attendance_tokens enable row level security;
-
 drop policy if exists employee_attendance_tokens_crud on public.employee_attendance_tokens;
 create policy employee_attendance_tokens_crud
 on public.employee_attendance_tokens
@@ -39,14 +34,12 @@ for all
 to authenticated
 using (app.is_org_member(org_id))
 with check (app.is_org_member(org_id));
-
 -- Extend attendance to store extra GPS/biometric metadata
 alter table public.attendance
   add column if not exists accuracy_m numeric(10,2),
   add column if not exists biometric jsonb,
   add column if not exists device jsonb,
   add column if not exists source text not null default 'worker_app';
-
 -- Helper: set/rotate employee token (org members only)
 create or replace function app.set_employee_attendance_token(p_employee_id uuid, p_token text)
 returns void
@@ -82,10 +75,8 @@ begin
   do update set token_hash = excluded.token_hash, is_active = true, updated_at = now();
 end;
 $$;
-
 revoke all on function app.set_employee_attendance_token(uuid, text) from public;
 grant execute on function app.set_employee_attendance_token(uuid, text) to authenticated;
-
 -- Public check-in/out (token-gated). Intended for worker device (no org membership).
 drop function if exists app.submit_attendance_with_token(text, text, date, numeric, numeric, numeric, jsonb, jsonb);
 create or replace function app.submit_attendance_with_token(
@@ -186,10 +177,8 @@ begin
   return v_row;
 end;
 $$;
-
 revoke all on function app.submit_attendance_with_token(text, text, numeric, numeric, date, numeric, jsonb, jsonb) from public;
 grant execute on function app.submit_attendance_with_token(text, text, numeric, numeric, date, numeric, jsonb, jsonb) to anon, authenticated;
-
 -- Helpful view for admin map/list
 create or replace view public.v_attendance_daily as
 select
@@ -215,5 +204,4 @@ select
 from public.attendance a
 join public.employees e on e.id = a.employee_id
 left join public.projects p on p.id = a.project_id;
-
 commit;

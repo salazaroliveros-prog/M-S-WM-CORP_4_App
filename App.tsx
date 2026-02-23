@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { LayoutDashboard, Wallet, HardHat, FileText, Activity, ShoppingCart, Users, Calculator, LogOut, Menu, X, Lock } from 'lucide-react';
+import { LayoutDashboard, Wallet, HardHat, FileText, Activity, ShoppingCart, Users, Calculator, LogOut, Menu, X, Lock, Bell } from 'lucide-react';
 import { ViewState, Project, RequisitionData, QuoteInitialData } from './types';
 import { getSupabaseClient, isSupabaseConfigured } from './lib/supabaseClient';
 import {
@@ -10,6 +10,8 @@ import {
   updateProject as dbUpdateProject,
   deleteProject as dbDeleteProject,
   createTransaction as dbCreateTransaction,
+  updateTransaction as dbUpdateTransaction,
+  deleteTransaction as dbDeleteTransaction,
   loadBudgetForProject,
   saveBudgetForProject,
   loadProgressForProject,
@@ -26,6 +28,7 @@ import {
   createEmployee,
   listRequisitionItems,
   setRequisitionItemsActualUnitCosts,
+  setRequisitionItemsUnitPrices,
   updateRequisitionStatus,
   listSuppliers,
   upsertSupplier,
@@ -43,6 +46,7 @@ import {
   upsertServiceQuote,
   deleteServiceQuote,
 } from './lib/db';
+import { createNotification } from './lib/notifications';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
@@ -59,10 +63,13 @@ import RRHH from './components/RRHH';
 import Cotizador from './components/Cotizador';
 import WorkerAttendance from './components/WorkerAttendance';
 import ContractIntake from './components/ContractIntake';
+import SupabaseDiagnostics from './components/SupabaseDiagnostics';
 
 const LOCAL_PASSWORD_KEY = 'ms_local_admin_password_v1';
 const LOCAL_TRANSACTIONS_KEY = 'transactions';
 const PENDING_TRANSACTIONS_KEY = 'wm_pending_transactions_v1';
+const PENDING_TRANSACTION_UPDATES_KEY = 'wm_pending_transaction_updates_v1';
+const PENDING_TRANSACTION_DELETES_KEY = 'wm_pending_transaction_deletes_v1';
 const LOCAL_PROJECTS_KEY = 'wm_offline_projects_v1';
 const PENDING_PROJECTS_KEY = 'wm_pending_projects_v1';
 const LOCAL_REQUISITIONS_KEY = 'wm_offline_requisitions_v1';
@@ -71,6 +78,10 @@ const LOCAL_REQUISITION_ITEMS_KEY = 'wm_offline_requisition_items_v1';
 const LOCAL_REQUISITION_ID_MAP_KEY = 'wm_requisition_id_map_v1';
 const LOCAL_EMPLOYEES_KEY = 'wm_offline_employees_v1';
 const PENDING_EMPLOYEES_KEY = 'wm_pending_employees_v1';
+
+const LOCAL_NOTIFICATIONS_KEY = 'wm_offline_notifications_v1';
+const PENDING_NOTIFICATIONS_KEY = 'wm_pending_notifications_v1';
+const RENT_DUE_SOON_ALERTS_KEY = 'wm_rent_due_soon_alerts_v1';
 
 const OFFLINE_BUDGET_KEY = (projectId: string) => `wm_budget_v1_${projectId}`;
 const PENDING_BUDGETS_KEY = 'wm_pending_budgets_v1';
@@ -98,6 +109,8 @@ const PENDING_ATTENDANCE_TOKENS_KEY = 'wm_pending_attendance_tokens_v1';
 
 const PENDING_REQUISITION_STATUS_KEY = 'wm_pending_requisition_status_v1';
 const PENDING_REQUISITION_ACTUAL_COSTS_KEY = 'wm_pending_requisition_actual_costs_v1';
+const PENDING_REQUISITION_UNIT_PRICES_KEY = 'wm_pending_requisition_unit_prices_v1';
+const LOCAL_PROJECT_MATERIAL_STOCK_KEY = 'wm_project_material_stock_v1';
 
 type Json = any;
 
@@ -118,6 +131,59 @@ function writeJson(key: string, value: Json) {
     // ignore
   }
 }
+
+type PendingNotification = {
+  orgId: string;
+  employeeId?: string | null;
+  type: string;
+  message: string;
+};
+
+type LocalNotificationRow = {
+  id: string;
+  org_id: string;
+  employee_id: string | null;
+  type: string;
+  message: string;
+  read: boolean;
+  created_at: string;
+};
+
+function pushLocalNotification(row: LocalNotificationRow) {
+  const existing = readJson<any[]>(LOCAL_NOTIFICATIONS_KEY, []);
+  const list = Array.isArray(existing) ? existing : [];
+  const already = list.some((n) => String((n as any)?.id || '') === row.id || String((n as any)?.message || '') === row.message);
+  if (already) return;
+  const next = [row, ...list].slice(0, 200);
+  writeJson(LOCAL_NOTIFICATIONS_KEY, next);
+}
+
+const syncOfflineNotifications = async (targetOrgId: string) => {
+  try {
+    const pending = readJson<PendingNotification[]>(PENDING_NOTIFICATIONS_KEY, []);
+    if (!Array.isArray(pending) || pending.length === 0) return;
+
+    const stillPending: PendingNotification[] = [];
+    for (const n of pending) {
+      try {
+        if (!n || n.orgId !== targetOrgId) continue;
+        await createNotification({
+          orgId: n.orgId,
+          employeeId: n.employeeId ?? null,
+          type: n.type,
+          message: n.message,
+        });
+      } catch (e) {
+        console.error('Error sincronizando notificación pendiente', e);
+        stillPending.push(n);
+      }
+    }
+
+    writeJson(PENDING_NOTIFICATIONS_KEY, stillPending);
+  } catch (e) {
+    console.error('Error procesando notificaciones pendientes', e);
+  }
+};
 
 function readObject(key: string): Record<string, any> {
   const v = readJson<any>(key, {});
@@ -172,6 +238,79 @@ const syncOfflineTransactions = async (targetOrgId: string) => {
     localStorage.setItem(PENDING_TRANSACTIONS_KEY, JSON.stringify(stillPending));
   } catch (e) {
     console.error('Error procesando transacciones pendientes', e);
+  }
+};
+
+const syncOfflineTransactionUpdates = async (targetOrgId: string) => {
+  try {
+    const raw = localStorage.getItem(PENDING_TRANSACTION_UPDATES_KEY);
+    const pending: any[] = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(pending) || pending.length === 0) return;
+
+    // If a delete is pending, updates are irrelevant.
+    const rawDeletes = localStorage.getItem(PENDING_TRANSACTION_DELETES_KEY);
+    const pendingDeletes: any[] = rawDeletes ? JSON.parse(rawDeletes) : [];
+    const deleteIds = new Set(
+      Array.isArray(pendingDeletes)
+        ? pendingDeletes
+            .map((d) => String(d?.id ?? ''))
+            .filter((x) => x)
+        : []
+    );
+
+    const stillPending: any[] = [];
+    for (const op of pending) {
+      try {
+        const id = String(op?.id ?? '');
+        const patch = op?.patch;
+        if (!id || !patch || deleteIds.has(id)) continue;
+        await dbUpdateTransaction(targetOrgId, id, patch);
+      } catch (e) {
+        console.error('Error sincronizando update de transacción pendiente', e);
+        stillPending.push(op);
+      }
+    }
+
+    localStorage.setItem(PENDING_TRANSACTION_UPDATES_KEY, JSON.stringify(stillPending));
+  } catch (e) {
+    console.error('Error procesando updates pendientes de transacciones', e);
+  }
+};
+
+const syncOfflineTransactionDeletes = async (targetOrgId: string) => {
+  try {
+    const raw = localStorage.getItem(PENDING_TRANSACTION_DELETES_KEY);
+    const pending: any[] = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(pending) || pending.length === 0) return;
+
+    // Drop any pending updates for ids that are pending delete.
+    const idsToDelete = new Set(pending.map((d) => String(d?.id ?? '')).filter((x) => x));
+    try {
+      const rawUpdates = localStorage.getItem(PENDING_TRANSACTION_UPDATES_KEY);
+      const updates: any[] = rawUpdates ? JSON.parse(rawUpdates) : [];
+      if (Array.isArray(updates) && updates.length) {
+        const filtered = updates.filter((u) => !idsToDelete.has(String(u?.id ?? '')));
+        localStorage.setItem(PENDING_TRANSACTION_UPDATES_KEY, JSON.stringify(filtered));
+      }
+    } catch {
+      // ignore
+    }
+
+    const stillPending: any[] = [];
+    for (const op of pending) {
+      try {
+        const id = String(op?.id ?? '');
+        if (!id) continue;
+        await dbDeleteTransaction(targetOrgId, id);
+      } catch (e) {
+        console.error('Error sincronizando delete de transacción pendiente', e);
+        stillPending.push(op);
+      }
+    }
+
+    localStorage.setItem(PENDING_TRANSACTION_DELETES_KEY, JSON.stringify(stillPending));
+  } catch (e) {
+    console.error('Error procesando deletes pendientes de transacciones', e);
   }
 };
 
@@ -344,6 +483,7 @@ const syncOfflineAttendanceManual = async (targetOrgId: string) => {
 const syncOfflineRequisitionMutations = async (targetOrgId: string) => {
   const statusOps = readJson<any[]>(PENDING_REQUISITION_STATUS_KEY, []);
   const costOps = readJson<any[]>(PENDING_REQUISITION_ACTUAL_COSTS_KEY, []);
+  const unitPriceOps = readJson<any[]>(PENDING_REQUISITION_UNIT_PRICES_KEY, []);
   const idMap = readObject(LOCAL_REQUISITION_ID_MAP_KEY);
   const resolveId = (id: any) => {
     const s = String(id ?? '');
@@ -376,6 +516,20 @@ const syncOfflineRequisitionMutations = async (targetOrgId: string) => {
       }
     }
     writeJson(PENDING_REQUISITION_ACTUAL_COSTS_KEY, still);
+  }
+
+  if (Array.isArray(unitPriceOps) && unitPriceOps.length > 0) {
+    const still: any[] = [];
+    for (const op of unitPriceOps) {
+      try {
+        if (!op?.requisitionId || !Array.isArray(op?.updates)) continue;
+        await setRequisitionItemsUnitPrices(targetOrgId, resolveId(op.requisitionId), op.updates);
+      } catch (e) {
+        console.error('Error sincronizando precios unitarios requisición', e);
+        still.push(op);
+      }
+    }
+    writeJson(PENDING_REQUISITION_UNIT_PRICES_KEY, still);
   }
 };
 
@@ -440,6 +594,7 @@ const syncOfflineRequisitions = async (targetOrgId: string) => {
 
             if (localItems && localItems.length > 0) {
               const updates: Array<{ id: string; actualUnitCost: number | null }> = [];
+              const priceUpdates: Array<{ id: string; unitPrice: number | null }> = [];
               for (let i = 0; i < remoteItems.length; i++) {
                 const localCost = localItems[i]?.actualUnitCost;
                 if (localCost === null || localCost === undefined) continue;
@@ -452,6 +607,22 @@ const syncOfflineRequisitions = async (targetOrgId: string) => {
                 map[String(remoteId)] = remoteItems.map((it) => ({
                   ...it,
                   actualUnitCost: byId.has(String(it.id)) ? byId.get(String(it.id))! : it.actualUnitCost,
+                }));
+                writeJson(LOCAL_REQUISITION_ITEMS_KEY, map);
+              }
+
+              for (let i = 0; i < remoteItems.length; i++) {
+                const localPrice = localItems[i]?.unitPrice;
+                if (localPrice === null || localPrice === undefined) continue;
+                priceUpdates.push({ id: String(remoteItems[i].id), unitPrice: Number(localPrice) });
+              }
+              if (priceUpdates.length > 0) {
+                await setRequisitionItemsUnitPrices(targetOrgId, String(remoteId), priceUpdates);
+                const byId = new Map<string, number | null>();
+                priceUpdates.forEach((u) => byId.set(String(u.id), u.unitPrice));
+                map[String(remoteId)] = (map[String(remoteId)] ?? remoteItems).map((it: any) => ({
+                  ...it,
+                  unitPrice: byId.has(String(it.id)) ? byId.get(String(it.id))! : it.unitPrice,
                 }));
                 writeJson(LOCAL_REQUISITION_ITEMS_KEY, map);
               }
@@ -481,6 +652,20 @@ const syncOfflineRequisitions = async (targetOrgId: string) => {
               writeJson(
                 PENDING_REQUISITION_ACTUAL_COSTS_KEY,
                 costOps.map((op) =>
+                  String(op?.requisitionId) === String(localId) ? { ...op, requisitionId: String(remoteId) } : op
+                )
+              );
+            }
+          } catch {
+            // ignore
+          }
+
+          try {
+            const priceOps = readJson<any[]>(PENDING_REQUISITION_UNIT_PRICES_KEY, []);
+            if (Array.isArray(priceOps)) {
+              writeJson(
+                PENDING_REQUISITION_UNIT_PRICES_KEY,
+                priceOps.map((op) =>
                   String(op?.requisitionId) === String(localId) ? { ...op, requisitionId: String(remoteId) } : op
                 )
               );
@@ -789,12 +974,55 @@ const App: React.FC = () => {
   };
 
   const handleCreateTransaction = async (tx: any) => {
+    const withId = tx && tx.id ? tx : { ...tx, id: crypto.randomUUID() };
+
+    const maybeQueueRentAlert = async (targetOrgId: string | null) => {
+      try {
+        if (!withId || String(withId.type || '').toUpperCase() !== 'GASTO') return;
+        const rentEnd = String(withId.rentEndDate || '').trim();
+        const provider = String(withId.provider || '').trim();
+        if (!rentEnd || !provider) return;
+
+        const proj = projects.find((p) => p.id === String(withId.projectId || ''));
+        const projLabel = proj?.name ? ` (Proyecto: ${proj.name})` : '';
+        const msg = `Alquiler con ${provider} vence ${rentEnd}${projLabel}. Ref TX:${String(withId.id)}`;
+
+        const existing = readJson<any[]>(LOCAL_NOTIFICATIONS_KEY, []);
+        const list = Array.isArray(existing) ? existing : [];
+        const already = list.some((n) => String((n as any)?.message || '').includes(`TX:${String(withId.id)}`));
+        if (!already) {
+          const localRow = {
+            id: `local-rent:${String(withId.id)}`,
+            org_id: targetOrgId ? String(targetOrgId) : 'local',
+            employee_id: null,
+            type: 'renta',
+            message: msg,
+            read: false,
+            created_at: new Date().toISOString(),
+          };
+          writeJson(LOCAL_NOTIFICATIONS_KEY, [localRow, ...list]);
+        }
+
+        if (isSupabaseConfigured && targetOrgId) {
+          try {
+            await createNotification({ orgId: targetOrgId, employeeId: null, type: 'renta', message: msg });
+          } catch (e) {
+            const pending = readJson<PendingNotification[]>(PENDING_NOTIFICATIONS_KEY, []);
+            const next = Array.isArray(pending) ? pending : [];
+            next.push({ orgId: targetOrgId, employeeId: null, type: 'renta', message: msg });
+            writeJson(PENDING_NOTIFICATIONS_KEY, next);
+          }
+        }
+      } catch {
+        // ignore
+      }
+    };
+
     if (!isSupabaseConfigured || !orgId) {
       try {
         const raw = localStorage.getItem(LOCAL_TRANSACTIONS_KEY);
         const existing: any[] = raw ? JSON.parse(raw) : [];
 
-        const withId = tx && tx.id ? tx : { ...tx, id: crypto.randomUUID() };
         const withDate = (withId as any).date ? withId : { ...withId, date: new Date().toISOString() };
 
         existing.push(withDate);
@@ -809,12 +1037,128 @@ const App: React.FC = () => {
         } catch (err) {
           console.error('Error marcando transacción como pendiente', err);
         }
+
+        await maybeQueueRentAlert(null);
       } catch (e) {
         console.error('Error guardando transacción local', e);
       }
       return;
     }
-    await dbCreateTransaction(orgId, tx);
+
+    const withDate = (withId as any).date ? withId : { ...withId, date: new Date().toISOString() };
+    await dbCreateTransaction(orgId, withDate);
+    await maybeQueueRentAlert(orgId);
+  };
+
+  const scanRentDueSoon = async (targetOrgId: string | null) => {
+    const thresholdDays = 7;
+    const today = new Date();
+    const todayDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const dueLimit = new Date(todayDate);
+    dueLimit.setDate(dueLimit.getDate() + thresholdDays);
+
+    const issued = readJson<Record<string, true>>(RENT_DUE_SOON_ALERTS_KEY, {} as Record<string, true>);
+    const issuedMap = issued && typeof issued === 'object' ? issued : {};
+
+    const projectNameById = new Map<string, string>();
+    for (const p of projects) projectNameById.set(String(p.id), String(p.name ?? ''));
+
+    type RentTx = { id: string; projectId: string; provider: string; rentEnd: string };
+    const candidates: RentTx[] = [];
+
+    if (isSupabaseConfigured && targetOrgId) {
+      try {
+        const supabase = getSupabaseClient();
+        const startStr = todayDate.toISOString().slice(0, 10);
+        const endStr = dueLimit.toISOString().slice(0, 10);
+        const res = await supabase
+          .from('transactions')
+          .select('id, project_id, provider, rent_end_date, type')
+          .eq('org_id', targetOrgId)
+          .eq('type', 'GASTO')
+          .not('rent_end_date', 'is', null)
+          .gte('rent_end_date', startStr)
+          .lte('rent_end_date', endStr)
+          .order('rent_end_date', { ascending: true });
+        if (res.error) throw res.error;
+        for (const r of res.data ?? []) {
+          const id = String((r as any).id ?? '');
+          const projectId = String((r as any).project_id ?? '');
+          const provider = String((r as any).provider ?? '').trim();
+          const rentEnd = String((r as any).rent_end_date ?? '').trim();
+          if (!id || !provider || !rentEnd) continue;
+          candidates.push({ id, projectId, provider, rentEnd });
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    } else {
+      try {
+        const raw = localStorage.getItem(LOCAL_TRANSACTIONS_KEY);
+        const txs: any[] = raw ? JSON.parse(raw) : [];
+        for (const t of Array.isArray(txs) ? txs : []) {
+          if (!t || typeof t !== 'object') continue;
+          if (String(t.type || '').toUpperCase() !== 'GASTO') continue;
+          const id = String(t.id ?? '');
+          const projectId = String(t.projectId ?? '');
+          const provider = String(t.provider ?? '').trim();
+          const rentEnd = String(t.rentEndDate ?? '').trim();
+          if (!id || !provider || !rentEnd) continue;
+          const rentD = new Date(`${rentEnd}T00:00:00`);
+          if (Number.isNaN(rentD.getTime())) continue;
+          if (rentD.getTime() < todayDate.getTime() || rentD.getTime() > dueLimit.getTime()) continue;
+          candidates.push({ id, projectId, provider, rentEnd });
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    for (const c of candidates) {
+      const key = `${c.id}::${c.rentEnd}`;
+      if (issuedMap[key]) continue;
+
+      const rentD = new Date(`${c.rentEnd}T00:00:00`);
+      const diffDays = Math.round((rentD.getTime() - todayDate.getTime()) / (1000 * 60 * 60 * 24));
+      const projName = projectNameById.get(String(c.projectId)) || '';
+      const projLabel = projName ? ` (Proyecto: ${projName})` : '';
+      const msg = `Renta por vencer: Alquiler con ${c.provider} vence ${c.rentEnd} (en ${diffDays} día(s))${projLabel}. Sugerencia: coordinar renovación. Ref TX:${c.id}`;
+
+      pushLocalNotification({
+        id: `local-rent-due:${c.id}:${c.rentEnd}`,
+        org_id: targetOrgId ? String(targetOrgId) : 'local',
+        employee_id: null,
+        type: 'renta',
+        message: msg,
+        read: false,
+        created_at: new Date().toISOString(),
+      });
+
+      if (typeof window !== 'undefined' && 'Notification' in window) {
+        try {
+          if ((window as any).Notification?.permission === 'granted') {
+            new Notification('Renta por vencer', { body: msg });
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      if (isSupabaseConfigured && targetOrgId) {
+        try {
+          await createNotification({ orgId: targetOrgId, employeeId: null, type: 'renta', message: msg });
+        } catch {
+          const pending = readJson<PendingNotification[]>(PENDING_NOTIFICATIONS_KEY, []);
+          const next = Array.isArray(pending) ? pending : [];
+          next.push({ orgId: targetOrgId, employeeId: null, type: 'renta', message: msg });
+          writeJson(PENDING_NOTIFICATIONS_KEY, next);
+        }
+      }
+
+      issuedMap[key] = true;
+    }
+
+    writeJson(RENT_DUE_SOON_ALERTS_KEY, issuedMap);
   };
 
   const handleLoadBudget = async (projectId: string) => {
@@ -1024,6 +1368,168 @@ const App: React.FC = () => {
   ) => {
     if (!requisitionId) return;
     const resolvedId = mapRequisitionId(requisitionId);
+
+    const normalizeKey = (v: string) => String(v || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const maybeApplyStockOnAccept = async (targetRequisitionId: string) => {
+      try {
+        const existingReqs = readJson<any[]>(LOCAL_REQUISITIONS_KEY, []);
+        const req = Array.isArray(existingReqs)
+          ? existingReqs.find((r) => String(r?.id) === String(targetRequisitionId) || String(r?.id) === String(requisitionId))
+          : null;
+        const projectId = req?.projectId ? String(req.projectId) : null;
+        if (!projectId) return;
+
+        const stockRoot = readObject(LOCAL_PROJECT_MATERIAL_STOCK_KEY);
+        const projectStock = (stockRoot[projectId] && typeof stockRoot[projectId] === 'object') ? stockRoot[projectId] : { items: {}, applied: [] };
+        const applied: string[] = Array.isArray(projectStock.applied) ? projectStock.applied : [];
+        if (applied.includes(String(targetRequisitionId))) return;
+
+        const itemsMap = readObject(LOCAL_REQUISITION_ITEMS_KEY);
+        const reqItems = itemsMap[String(targetRequisitionId)] ?? itemsMap[String(requisitionId)];
+        const safeItems = Array.isArray(reqItems) ? reqItems : [];
+        if (safeItems.length === 0) return;
+
+        // Build baseline budget quantities from cached budget (do not accumulate across accepts).
+        const budget = readJson<any>(OFFLINE_BUDGET_KEY(projectId), null);
+        const budgetLines = budget && Array.isArray(budget.lines) ? budget.lines : [];
+        const previousItems: Record<string, any> = (projectStock.items && typeof projectStock.items === 'object') ? projectStock.items : {};
+        const budgetMap: Record<string, any> = {};
+
+        for (const line of budgetLines) {
+          const lineQty = Number(line?.quantity ?? 0) || 0;
+          const mats = Array.isArray(line?.materials) ? line.materials : [];
+          for (const m of mats) {
+            const name = String(m?.name ?? '').trim();
+            const unit = String(m?.unit ?? '').trim() || 'Unidad';
+            if (!name) continue;
+            const perUnit = Number(m?.quantityPerUnit ?? 0) || 0;
+            const qty = lineQty * perUnit;
+            if (!(Number.isFinite(qty) && qty > 0)) continue;
+            const key = `${normalizeKey(name)}|${normalizeKey(unit)}`;
+            const prev = budgetMap[key] ?? { name, unit, budgetQty: 0 };
+            budgetMap[key] = {
+              name,
+              unit,
+              budgetQty: (Number(prev.budgetQty) || 0) + qty,
+            };
+          }
+        }
+
+        // Merge in any previously tracked purchased quantities.
+        const nextItems: Record<string, any> = {};
+        for (const [key, b] of Object.entries(budgetMap)) {
+          const prevPurchased = previousItems[key]?.purchasedQty;
+          nextItems[key] = {
+            name: b.name,
+            unit: b.unit,
+            budgetQty: Number((b as any).budgetQty) || 0,
+            purchasedQty: Number(prevPurchased) || 0,
+          };
+        }
+
+        // Keep purchased-only materials that are not in the budget map.
+        for (const [key, prev] of Object.entries(previousItems)) {
+          if (nextItems[key]) continue;
+          nextItems[key] = {
+            name: String((prev as any)?.name ?? ''),
+            unit: String((prev as any)?.unit ?? 'Unidad'),
+            budgetQty: Number((prev as any)?.budgetQty) || 0,
+            purchasedQty: Number((prev as any)?.purchasedQty) || 0,
+          };
+        }
+
+        // Apply accepted requisition quantities as purchased.
+        for (const it of safeItems) {
+          const name = String(it?.name ?? '').trim();
+          const unit = String(it?.unit ?? '').trim() || 'Unidad';
+          const qty = Number(it?.quantity ?? 0) || 0;
+          if (!name || !(Number.isFinite(qty) && qty > 0)) continue;
+          const key = `${normalizeKey(name)}|${normalizeKey(unit)}`;
+          const prev = nextItems[key] ?? { name, unit, budgetQty: 0, purchasedQty: 0 };
+          nextItems[key] = {
+            name,
+            unit,
+            budgetQty: Number(prev.budgetQty) || 0,
+            purchasedQty: (Number(prev.purchasedQty) || 0) + qty,
+          };
+        }
+
+        stockRoot[projectId] = {
+          items: nextItems,
+          applied: [...applied, String(targetRequisitionId)],
+          updatedAt: new Date().toISOString(),
+        };
+        writeJson(LOCAL_PROJECT_MATERIAL_STOCK_KEY, stockRoot);
+      } catch {
+        // ignore
+      }
+    };
+
+    const maybeRollbackStockOnCancel = async (targetRequisitionId: string) => {
+      try {
+        const existingReqs = readJson<any[]>(LOCAL_REQUISITIONS_KEY, []);
+        const req = Array.isArray(existingReqs)
+          ? existingReqs.find((r) => String(r?.id) === String(targetRequisitionId) || String(r?.id) === String(requisitionId))
+          : null;
+        const projectId = req?.projectId ? String(req.projectId) : null;
+        if (!projectId) return;
+
+        const stockRoot = readObject(LOCAL_PROJECT_MATERIAL_STOCK_KEY);
+        const projectStock = (stockRoot[projectId] && typeof stockRoot[projectId] === 'object') ? stockRoot[projectId] : null;
+        if (!projectStock) return;
+
+        const applied: string[] = Array.isArray(projectStock.applied) ? projectStock.applied : [];
+        if (!applied.includes(String(targetRequisitionId))) return;
+
+        const itemsMap = readObject(LOCAL_REQUISITION_ITEMS_KEY);
+        const reqItems = itemsMap[String(targetRequisitionId)] ?? itemsMap[String(requisitionId)];
+        const safeItems = Array.isArray(reqItems) ? reqItems : [];
+        if (safeItems.length === 0) return;
+
+        const nextItems: Record<string, any> = (projectStock.items && typeof projectStock.items === 'object') ? { ...projectStock.items } : {};
+
+        for (const it of safeItems) {
+          const name = String(it?.name ?? '').trim();
+          const unit = String(it?.unit ?? '').trim() || 'Unidad';
+          const qty = Number(it?.quantity ?? 0) || 0;
+          if (!name || !(Number.isFinite(qty) && qty > 0)) continue;
+
+          const key = `${normalizeKey(name)}|${normalizeKey(unit)}`;
+          const prev = nextItems[key] ?? { name, unit, budgetQty: 0, purchasedQty: 0 };
+          const nextPurchased = Math.max(0, (Number(prev.purchasedQty) || 0) - qty);
+          nextItems[key] = {
+            name: prev.name ?? name,
+            unit: prev.unit ?? unit,
+            budgetQty: Number(prev.budgetQty) || 0,
+            purchasedQty: nextPurchased,
+          };
+        }
+
+        stockRoot[projectId] = {
+          ...projectStock,
+          items: nextItems,
+          applied: applied.filter((id) => String(id) !== String(targetRequisitionId)),
+          updatedAt: new Date().toISOString(),
+        };
+        writeJson(LOCAL_PROJECT_MATERIAL_STOCK_KEY, stockRoot);
+      } catch {
+        // ignore
+      }
+    };
+
+    // Determine previous local status before writing the new one.
+    const previousStatus = (() => {
+      try {
+        const existing = readJson<any[]>(LOCAL_REQUISITIONS_KEY, []);
+        const row = Array.isArray(existing)
+          ? existing.find((r) => String(r?.id) === String(requisitionId) || String(r?.id) === String(resolvedId))
+          : null;
+        return row?.status ? String(row.status).toLowerCase() : null;
+      } catch {
+        return null;
+      }
+    })();
+
     // Always update local view if present
     try {
       const existing = readJson<any[]>(LOCAL_REQUISITIONS_KEY, []);
@@ -1037,6 +1543,22 @@ const App: React.FC = () => {
       }
     } catch {
       // ignore
+    }
+
+    // Apply stock deduction once when a requisition is accepted (confirmed).
+    if (String(status).toLowerCase() === 'confirmed' && previousStatus !== 'confirmed') {
+      await maybeApplyStockOnAccept(String(resolvedId));
+    }
+
+    // Roll back stock deduction if an accepted requisition later moves back to a non-accepted state.
+    // (e.g., confirmed/received -> cancelled/sent/draft)
+    {
+      const nextStatus = String(status).toLowerCase();
+      const wasAccepted = previousStatus && ['confirmed', 'received'].includes(previousStatus);
+      const isAcceptedNow = ['confirmed', 'received'].includes(nextStatus);
+      if (wasAccepted && !isAcceptedNow) {
+        await maybeRollbackStockOnCancel(String(resolvedId));
+      }
     }
 
     if (isSupabaseConfigured && orgId) {
@@ -1124,6 +1646,73 @@ const App: React.FC = () => {
     const next = Array.isArray(pending) ? pending.filter((p) => p?.requisitionId !== resolvedId) : [];
     next.push({ requisitionId: resolvedId, updates });
     writeJson(PENDING_REQUISITION_ACTUAL_COSTS_KEY, next);
+  };
+
+  const handleSaveRequisitionUnitPrices = async (
+    requisitionId: string,
+    updates: Array<{ id: string; unitPrice: number | null }>
+  ) => {
+    if (!requisitionId) return;
+    const resolvedId = mapRequisitionId(requisitionId);
+
+    // Update local cached items.
+    try {
+      const map = readObject(LOCAL_REQUISITION_ITEMS_KEY);
+      const current = map[String(resolvedId)] ?? map[String(requisitionId)];
+      if (Array.isArray(current)) {
+        const byId = new Map<string, any>();
+        current.forEach((it: any) => {
+          if (it?.id) byId.set(String(it.id), it);
+        });
+        for (const u of updates) {
+          const it = byId.get(String(u.id));
+          if (it) it.unitPrice = u.unitPrice;
+        }
+        map[String(resolvedId)] = Array.from(byId.values());
+        writeJson(LOCAL_REQUISITION_ITEMS_KEY, map);
+      }
+    } catch {
+      // ignore
+    }
+
+    // Update local requisitions total (so history reflects prices even offline).
+    try {
+      const map = readObject(LOCAL_REQUISITION_ITEMS_KEY);
+      const current = map[String(resolvedId)] ?? map[String(requisitionId)];
+      const safe = Array.isArray(current) ? current : [];
+      const total = safe.reduce((acc: number, it: any) => {
+        const q = Number(it?.quantity ?? 0) || 0;
+        const p = it?.unitPrice === null || it?.unitPrice === undefined ? null : Number(it.unitPrice);
+        if (!Number.isFinite(q) || q <= 0) return acc;
+        if (p === null || !Number.isFinite(p) || p <= 0) return acc;
+        return acc + q * p;
+      }, 0);
+      const existing = readJson<any[]>(LOCAL_REQUISITIONS_KEY, []);
+      if (Array.isArray(existing) && existing.length > 0) {
+        writeJson(
+          LOCAL_REQUISITIONS_KEY,
+          existing.map((r) =>
+            String(r?.id) === String(requisitionId) || String(r?.id) === String(resolvedId) ? { ...r, total } : r
+          )
+        );
+      }
+    } catch {
+      // ignore
+    }
+
+    if (isSupabaseConfigured && orgId) {
+      try {
+        await setRequisitionItemsUnitPrices(orgId, resolvedId, updates);
+        return;
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    const pending = readJson<any[]>(PENDING_REQUISITION_UNIT_PRICES_KEY, []);
+    const next = Array.isArray(pending) ? pending.filter((p) => p?.requisitionId !== resolvedId) : [];
+    next.push({ requisitionId: resolvedId, updates });
+    writeJson(PENDING_REQUISITION_UNIT_PRICES_KEY, next);
   };
 
   const handleListSuppliers = async () => {
@@ -1626,6 +2215,10 @@ const App: React.FC = () => {
         await Promise.all([
           syncOfflineProjects(resolvedOrgId),
           syncOfflineTransactions(resolvedOrgId),
+          syncOfflineTransactionUpdates(resolvedOrgId),
+          syncOfflineTransactionDeletes(resolvedOrgId),
+          syncOfflineNotifications(resolvedOrgId),
+          scanRentDueSoon(resolvedOrgId),
           syncOfflineRequisitions(resolvedOrgId),
           syncOfflineEmployees(resolvedOrgId),
           syncOfflineBudgets(resolvedOrgId),
@@ -1654,6 +2247,10 @@ const App: React.FC = () => {
       void Promise.all([
         syncOfflineProjects(orgId),
         syncOfflineTransactions(orgId),
+        syncOfflineTransactionUpdates(orgId),
+        syncOfflineTransactionDeletes(orgId),
+        syncOfflineNotifications(orgId),
+        scanRentDueSoon(orgId),
         syncOfflineRequisitions(orgId),
         syncOfflineEmployees(orgId),
         syncOfflineBudgets(orgId),
@@ -1671,6 +2268,37 @@ const App: React.FC = () => {
     window.addEventListener('online', onOnline);
     return () => window.removeEventListener('online', onOnline);
   }, [orgId]);
+
+  const handleSyncNow = async () => {
+    if (!isSupabaseConfigured || !orgId) return;
+    try {
+      await Promise.all([
+        syncOfflineProjects(orgId),
+        syncOfflineTransactions(orgId),
+        syncOfflineTransactionUpdates(orgId),
+        syncOfflineTransactionDeletes(orgId),
+        syncOfflineNotifications(orgId),
+        scanRentDueSoon(orgId),
+        syncOfflineRequisitions(orgId),
+        syncOfflineEmployees(orgId),
+        syncOfflineBudgets(orgId),
+        syncOfflineProgress(orgId),
+        syncOfflineSuppliers(orgId),
+        syncOfflinePayRates(orgId),
+        syncOfflineEmployeeOverrides(orgId),
+        syncOfflineContracts(orgId),
+        syncOfflineQuotes(orgId),
+        syncOfflineAttendanceTokens(),
+        syncOfflineAttendanceManual(orgId),
+        syncOfflineRequisitionMutations(orgId),
+      ]);
+      // force refresh of dependent views
+      setSyncVersion((v) => v + 1);
+    } catch (e: any) {
+      console.error(e);
+      setCloudError(e?.message || 'Error sincronizando con la nube');
+    }
+  };
 
   const handleLogout = () => {
     setIsAuthenticated(false);
@@ -1742,6 +2370,8 @@ const App: React.FC = () => {
           <NavItem view="COMPRAS" icon={ShoppingCart} label="Compras" />
           <NavItem view="RRHH" icon={Users} label="Recursos Humanos" />
           <NavItem view="COTIZADOR" icon={Calculator} label="Cotizador Rápido" />
+          <NavItem view="NOTIFICACIONES" icon={Bell} label="Notificaciones" />
+          <NavItem view="DIAGNOSTICO" icon={Activity} label="Diagnóstico" />
         </nav>
         <div className="p-4 border-t border-navy-800">
           <button onClick={handleLogout} className="flex items-center space-x-2 text-red-400 hover:text-red-300 w-full p-2">
@@ -1782,6 +2412,8 @@ const App: React.FC = () => {
             <NavItem view="COMPRAS" icon={ShoppingCart} label="Compras" />
             <NavItem view="RRHH" icon={Users} label="Recursos Humanos" />
             <NavItem view="COTIZADOR" icon={Calculator} label="Cotizador" />
+              <NavItem view="NOTIFICACIONES" icon={Bell} label="Notificaciones" />
+              <NavItem view="DIAGNOSTICO" icon={Activity} label="Diagnóstico" />
             <button onClick={handleLogout} className="flex items-center space-x-3 w-full p-3 text-red-400 mt-4">
               <LogOut size={20} />
               <span>Salir</span>
@@ -1811,6 +2443,8 @@ const App: React.FC = () => {
                   {currentView === 'COMPRAS' && 'Logística y Proveedores'}
                   {currentView === 'RRHH' && 'Personal y Planillas'}
                   {currentView === 'COTIZADOR' && 'Cotización de Servicios'}
+                  {currentView === 'NOTIFICACIONES' && 'Notificaciones'}
+                  {currentView === 'DIAGNOSTICO' && 'Diagnóstico Supabase'}
                 </h2>
              </div>
              <div className="text-right hidden sm:block">
@@ -1851,6 +2485,7 @@ const App: React.FC = () => {
                 projects={projects}
                 useCloud={isSupabaseConfigured && !!orgId}
                 orgId={orgId}
+                onSyncNow={handleSyncNow}
               />
             )}
             {currentView === 'PROYECTOS' && (
@@ -1902,7 +2537,8 @@ const App: React.FC = () => {
                 onUpdateRequisitionStatus={handleUpdateRequisitionStatus}
                 onListRequisitionItems={handleListRequisitionItems}
                 onSaveRequisitionActualCosts={handleSaveRequisitionActualCosts}
-                canApproveRequisitions={isSupabaseConfigured && !!orgId}
+                onSaveRequisitionUnitPrices={handleSaveRequisitionUnitPrices}
+                canApproveRequisitions={!isSupabaseConfigured || !!orgId}
                 onListSuppliers={handleListSuppliers}
                 onUpsertSupplier={handleUpsertSupplier}
                 onDeleteSupplier={handleDeleteSupplier}
@@ -1934,6 +2570,23 @@ const App: React.FC = () => {
                 onUpsertQuote={handleUpsertQuote}
                 onDeleteQuote={handleDeleteQuote}
               />
+            )}
+
+            {currentView === 'NOTIFICACIONES' && (
+              <Notifications
+                orgId={orgId}
+                useCloud={isSupabaseConfigured && !!orgId}
+              />
+            )}
+
+            {currentView === 'DIAGNOSTICO' && (
+              isSupabaseConfigured && orgId ? (
+                <SupabaseDiagnostics />
+              ) : (
+                <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-4">
+                  El diagnóstico requiere Supabase configurado y sesión activa en la nube.
+                </div>
+              )
             )}
           </div>
 

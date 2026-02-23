@@ -11,7 +11,6 @@ create table if not exists public.project_material_stock (
   updated_at timestamptz not null default now(),
   constraint project_material_stock_unique unique (project_id, material_name, unit)
 );
-
 -- Trigger para actualizar remaining_qty automáticamente
 create or replace function app.tg_update_remaining_qty()
 returns trigger as $$
@@ -21,12 +20,10 @@ begin
   return new;
 end;
 $$ language plpgsql;
-
 drop trigger if exists update_remaining_qty on public.project_material_stock;
 create trigger update_remaining_qty
 before insert or update on public.project_material_stock
 for each row execute function app.tg_update_remaining_qty();
-
 -- Consulta para comparar lo presupuestado vs lo comprado real
 -- (por proyecto y material)
 -- Ejemplo de uso:
@@ -60,7 +57,6 @@ begin
   return new;
 end;
 $$ language plpgsql;
-
 drop trigger if exists after_insert_requisition_item_update_stock on public.requisition_items;
 create trigger after_insert_requisition_item_update_stock
 after insert on public.requisition_items

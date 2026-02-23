@@ -339,6 +339,7 @@ export async function createTransaction(orgId: string, tx: Transaction): Promise
   requireFiniteNumber(tx?.cost, 'cost');
 
   const res = await supabase.from('transactions').insert({
+    id: tx.id || undefined,
     org_id: orgId,
     project_id: tx.projectId,
     type: tx.type,
@@ -380,7 +381,7 @@ export async function listTransactions(orgId: string, input?: { projectId?: stri
 export async function updateTransaction(
   orgId: string,
   transactionId: string,
-  patch: Partial<Pick<Transaction, 'description' | 'amount' | 'unit' | 'cost' | 'category' | 'date' | 'provider' | 'rentEndDate'>>
+  patch: Partial<Pick<Transaction, 'type' | 'description' | 'amount' | 'unit' | 'cost' | 'category' | 'date' | 'provider' | 'rentEndDate'>>
 ): Promise<Transaction> {
   const supabase = getSupabaseClient();
 
@@ -388,6 +389,7 @@ export async function updateTransaction(
   requireNonEmpty(transactionId, 'transactionId');
 
   const payload: any = {};
+  if (patch.type !== undefined) payload.type = patch.type;
   if (patch.description !== undefined) payload.description = patch.description;
   if (patch.amount !== undefined) payload.amount = patch.amount;
   if (patch.unit !== undefined) payload.unit = patch.unit;
@@ -407,6 +409,21 @@ export async function updateTransaction(
 
   if (res.error) throw res.error;
   return fromDbTransaction(res.data);
+}
+
+export async function deleteTransaction(orgId: string, transactionId: string): Promise<void> {
+  const supabase = getSupabaseClient();
+
+  requireNonEmpty(orgId, 'orgId');
+  requireNonEmpty(transactionId, 'transactionId');
+
+  const res = await supabase
+    .from('transactions')
+    .delete()
+    .eq('org_id', orgId)
+    .eq('id', transactionId);
+
+  if (res.error) throw res.error;
 }
 
 // -----------------------------------------------------------------------------
@@ -1453,6 +1470,39 @@ export async function setRequisitionItemsActualUnitCosts(
       const res = await supabase
         .from('requisition_items')
         .update({ actual_unit_cost: u.actualUnitCost })
+        .eq('org_id', orgId)
+        .eq('requisition_id', requisitionId)
+        .eq('id', u.id);
+      if (res.error) throw res.error;
+    })
+  );
+}
+
+export async function setRequisitionItemsUnitPrices(
+  orgId: string,
+  requisitionId: string,
+  updates: Array<{ id: string; unitPrice: number | null }>
+): Promise<void> {
+  const supabase = getSupabaseClient();
+  requireNonEmpty(orgId, 'orgId');
+  requireNonEmpty(requisitionId, 'requisitionId');
+  if (!Array.isArray(updates)) throw new Error('updates inválido');
+
+  const normalized = updates
+    .map((u) => ({
+      id: String(u.id),
+      unitPrice:
+        u.unitPrice === null || u.unitPrice === undefined
+          ? null
+          : (Number.isFinite(Number(u.unitPrice)) ? Math.max(0, Number(u.unitPrice)) : null),
+    }))
+    .filter((u) => !!u.id);
+
+  await Promise.all(
+    normalized.map(async (u) => {
+      const res = await supabase
+        .from('requisition_items')
+        .update({ unit_price: u.unitPrice })
         .eq('org_id', orgId)
         .eq('requisition_id', requisitionId)
         .eq('id', u.id);

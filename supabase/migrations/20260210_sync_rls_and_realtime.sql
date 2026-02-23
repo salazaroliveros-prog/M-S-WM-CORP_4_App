@@ -11,14 +11,12 @@ BEGIN
   RAISE NOTICE 'Starting migration: sync RLS + publication (publication=%).', v_pubname;
 END;
 $$;
-
 -- Utility: enable RLS if table exists
 DO $$
 BEGIN
   PERFORM 1; -- noop block to keep form
 END;
 $$;
-
 -- Create/replace policies for commonly used tables (only when table exists)
 
 -- Messages / Threads / Chat
@@ -85,7 +83,6 @@ BEGIN
   END IF;
 END;
 $$;
-
 -- Profiles (perfiles) - allow users to view/edit their own profile
 DO $$
 BEGIN
@@ -111,7 +108,6 @@ BEGIN
   END IF;
 END;
 $$;
-
 -- Photos / bitacora (fotos_bitacora)
 DO $$
 BEGIN
@@ -137,7 +133,6 @@ BEGIN
   END IF;
 END;
 $$;
-
 -- Material catalog / prices
 DO $$
 BEGIN
@@ -168,7 +163,6 @@ BEGIN
   END IF;
 END;
 $$;
-
 -- Allow public read for 'proyectos' table if present (legacy spanish table)
 DO $$
 BEGIN
@@ -180,7 +174,6 @@ BEGIN
   END IF;
 END;
 $$;
-
 -- Worker-specific: allow trabajadores to read own profile (if table exists)
 DO $$
 BEGIN
@@ -200,7 +193,6 @@ BEGIN
   END IF;
 END;
 $$;
-
 -- Ensure Realtime publication contains core and extra tables (idempotent)
 DO $$
 DECLARE
@@ -238,7 +230,6 @@ BEGIN
   END LOOP;
 END;
 $$;
-
 -- Verification hints:
 -- SELECT schemaname, tablename FROM pg_publication_tables WHERE pubname = 'supabase_realtime' ORDER BY schemaname, tablename;
 -- SELECT schemaname, tablename, policyname FROM pg_policies WHERE schemaname='public' ORDER BY tablename, policyname;

@@ -7,7 +7,6 @@ alter table public.requisitions
   add column if not exists received_by uuid,
   add column if not exists cancelled_by uuid,
   add column if not exists cancelled_at timestamptz;
-
 -- Stamp actor + timestamps and enforce valid transitions
 create or replace function app.tg_requisitions_status_workflow()
 returns trigger
@@ -56,13 +55,11 @@ begin
   return new;
 end;
 $$;
-
 drop trigger if exists requisitions_status_workflow on public.requisitions;
 create trigger requisitions_status_workflow
 before update on public.requisitions
 for each row
 execute function app.tg_requisitions_status_workflow();
-
 -- RLS tightening: members can create + view; only admins can approve/receive;
 -- creators can edit/cancel while draft/sent.
 
@@ -72,25 +69,21 @@ do $$ begin
   execute 'alter table public.requisition_items enable row level security';
 exception when others then null;
 end $$;
-
 -- Replace broad CRUD policies with granular ones
 
 drop policy if exists requisitions_crud on public.requisitions;
-
 drop policy if exists requisitions_select on public.requisitions;
 create policy requisitions_select
 on public.requisitions
 for select
 to authenticated
 using (app.is_org_member(org_id));
-
 drop policy if exists requisitions_insert on public.requisitions;
 create policy requisitions_insert
 on public.requisitions
 for insert
 to authenticated
 with check (app.is_org_member(org_id));
-
 drop policy if exists requisitions_update on public.requisitions;
 create policy requisitions_update
 on public.requisitions
@@ -110,7 +103,6 @@ with check (
     and status in ('draft', 'sent', 'cancelled')
   )
 );
-
 drop policy if exists requisitions_delete on public.requisitions;
 create policy requisitions_delete
 on public.requisitions
@@ -123,18 +115,15 @@ using (
     and status in ('draft', 'sent', 'cancelled')
   )
 );
-
 -- Items: members can read; only admins or creator while requisition is draft can write
 
 drop policy if exists requisition_items_crud on public.requisition_items;
-
 drop policy if exists requisition_items_select on public.requisition_items;
 create policy requisition_items_select
 on public.requisition_items
 for select
 to authenticated
 using (app.is_org_member(org_id));
-
 drop policy if exists requisition_items_insert on public.requisition_items;
 create policy requisition_items_insert
 on public.requisition_items
@@ -153,7 +142,6 @@ with check (
       )
   )
 );
-
 drop policy if exists requisition_items_update on public.requisition_items;
 create policy requisition_items_update
 on public.requisition_items
@@ -185,7 +173,6 @@ with check (
       )
   )
 );
-
 drop policy if exists requisition_items_delete on public.requisition_items;
 create policy requisition_items_delete
 on public.requisition_items
