@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { LayoutDashboard, Wallet, HardHat, FileText, Activity, ShoppingCart, Users, Calculator, LogOut, Menu, X, Lock } from 'lucide-react';
 import { ViewState, Project, RequisitionData, QuoteInitialData } from './types';
 import { getSupabaseClient, isSupabaseConfigured } from './lib/supabaseClient';
@@ -563,6 +563,11 @@ const App: React.FC = () => {
   const [orgId, setOrgId] = useState<string | null>(null);
   const [cloudError, setCloudError] = useState<string | null>(null);
 
+  const [syncVersion, setSyncVersion] = useState(0);
+  const realtimeChannelRef = useRef<any>(null);
+  const realtimeBumpTimerRef = useRef<number | null>(null);
+  const realtimeProjectsTimerRef = useRef<number | null>(null);
+
   // Global State (Mocking a database)
   const [projects, setProjects] = useState<Project[]>([]);
   
@@ -613,6 +618,96 @@ const App: React.FC = () => {
     const cached = readJson<Project[]>(LOCAL_PROJECTS_KEY, []);
     if (Array.isArray(cached)) setProjects(cached);
   };
+
+  // Centralized Realtime: bump syncVersion so modules can reload when open.
+  // We keep this at App level to cover modules that don't have their own per-view subscriptions.
+  useEffect(() => {
+    if (!isSupabaseConfigured || !orgId) return;
+
+    const supabase = getSupabaseClient();
+
+    const clearTimers = () => {
+      if (realtimeBumpTimerRef.current) window.clearTimeout(realtimeBumpTimerRef.current);
+      realtimeBumpTimerRef.current = null;
+      if (realtimeProjectsTimerRef.current) window.clearTimeout(realtimeProjectsTimerRef.current);
+      realtimeProjectsTimerRef.current = null;
+    };
+
+    const scheduleBump = () => {
+      if (realtimeBumpTimerRef.current) window.clearTimeout(realtimeBumpTimerRef.current);
+      realtimeBumpTimerRef.current = window.setTimeout(() => {
+        setSyncVersion((v) => v + 1);
+      }, 250);
+    };
+
+    const scheduleProjectsRefresh = () => {
+      if (realtimeProjectsTimerRef.current) window.clearTimeout(realtimeProjectsTimerRef.current);
+      realtimeProjectsTimerRef.current = window.setTimeout(() => {
+        void refreshProjects(orgId);
+      }, 400);
+    };
+
+    const attachTable = (channel: any, table: string) => {
+      channel.on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table, filter: `org_id=eq.${orgId}` },
+        () => {
+          scheduleBump();
+          if (table === 'projects') scheduleProjectsRefresh();
+        }
+      );
+    };
+
+    // Cleanup any previous channel (defensive).
+    try {
+      if (realtimeChannelRef.current) {
+        supabase.removeChannel(realtimeChannelRef.current);
+        realtimeChannelRef.current = null;
+      }
+    } catch {
+      // ignore
+    }
+    clearTimers();
+
+    const channel = supabase.channel(`app-realtime:${orgId}`);
+    // Core + modules tables.
+    const tables = [
+      'projects',
+      'transactions',
+      'budgets',
+      'budget_lines',
+      'budget_line_materials',
+      'suppliers',
+      'requisitions',
+      'requisition_items',
+      'employees',
+      'employee_contracts',
+      'org_pay_rates',
+      'employee_rate_overrides',
+      'service_quotes',
+      'project_progress',
+      'project_progress_lines',
+      'attendance',
+      'employee_attendance_tokens',
+      'notifications',
+    ];
+    for (const t of tables) attachTable(channel, t);
+
+    channel.subscribe();
+    realtimeChannelRef.current = channel;
+
+    return () => {
+      clearTimers();
+      try {
+        if (realtimeChannelRef.current) {
+          supabase.removeChannel(realtimeChannelRef.current);
+          realtimeChannelRef.current = null;
+        }
+      } catch {
+        // ignore
+      }
+    };
+  }, [orgId]);
 
   const handleCreateProject = async (partial: Partial<Project>) => {
     const localId = crypto.randomUUID();
@@ -1777,6 +1872,7 @@ const App: React.FC = () => {
               <Presupuestos 
                 projects={projects} 
                 initialProjectId={preselectedProjectId}
+                syncVersion={syncVersion}
                 onQuickBuy={handleQuickBuy}
                 onLoadBudget={handleLoadBudget}
                 onSaveBudget={handleSaveBudget}
@@ -1793,6 +1889,7 @@ const App: React.FC = () => {
                 projects={projects}
                 useCloud={isSupabaseConfigured && !!orgId}
                 orgId={orgId}
+                syncVersion={syncVersion}
                 onLoadBudget={handleLoadBudget}
                 onLoadProgress={handleLoadProgress}
                 onSaveProgress={handleSaveProgress}
@@ -1802,6 +1899,7 @@ const App: React.FC = () => {
               <Compras 
                 projects={projects} 
                 initialData={requisitionData}
+                syncVersion={syncVersion}
                 onCreateRequisition={handleCreateRequisition}
                 onListRequisitions={handleListRequisitions}
                 onUpdateRequisitionStatus={handleUpdateRequisitionStatus}
@@ -1816,7 +1914,7 @@ const App: React.FC = () => {
             {currentView === 'RRHH' && (
               <RRHH
                 projects={projects}
-                syncVersion={0}
+                syncVersion={syncVersion}
                 isAdmin={isSupabaseConfigured && !!orgId}
                 onListEmployees={handleListEmployees}
                 onCreateEmployee={handleCreateEmployee}
@@ -1834,7 +1932,7 @@ const App: React.FC = () => {
             {currentView === 'COTIZADOR' && (
               <Cotizador 
                 initialData={quoteInitialData} 
-                syncVersion={0}
+                syncVersion={syncVersion}
                 onListQuotes={handleListQuotes}
                 onUpsertQuote={handleUpsertQuote}
                 onDeleteQuote={handleDeleteQuote}
