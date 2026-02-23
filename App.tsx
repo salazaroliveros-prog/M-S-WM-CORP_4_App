@@ -646,12 +646,15 @@ const App: React.FC = () => {
     await deleteServiceQuote(orgId, quoteId);
   };
 
-  const handleLogin = async (_email: string, password: string) => {
+  const handleLogin = async (email: string, password: string) => {
     const trimmedPassword = String(password || '').trim();
     if (!trimmedPassword) {
       const err = new Error('Contraseña requerida.');
       throw err;
     }
+
+    const trimmedEmail = String(email || '').trim();
+    const hasUserEmail = Boolean(trimmedEmail);
 
     // Login 100% local por dispositivo, usando localStorage
     const existingPassword = localStorage.getItem(LOCAL_PASSWORD_KEY);
@@ -659,8 +662,21 @@ const App: React.FC = () => {
       // Primera vez en este dispositivo: registra la contraseña ingresada
       localStorage.setItem(LOCAL_PASSWORD_KEY, trimmedPassword);
     } else if (existingPassword !== trimmedPassword) {
-      const err = new Error('Contraseña incorrecta para este dispositivo.');
-      throw err;
+      // If user provided an email and Supabase is configured, allow cloud sign-in attempt.
+      // This avoids being locked out on GitHub Pages (no embedded service credentials).
+      if (isSupabaseConfigured && hasUserEmail) {
+        try {
+          await ensureSupabaseSession(trimmedEmail, trimmedPassword);
+          // Align local device password with the provided credentials.
+          localStorage.setItem(LOCAL_PASSWORD_KEY, trimmedPassword);
+        } catch {
+          const err = new Error('Contraseña incorrecta para este dispositivo.');
+          throw err;
+        }
+      } else {
+        const err = new Error('Contraseña incorrecta para este dispositivo.');
+        throw err;
+      }
     }
 
     // En este punto el login local fue exitoso
@@ -679,26 +695,20 @@ const App: React.FC = () => {
         const serviceEmail = rawEmail && String(rawEmail).trim() ? String(rawEmail).trim() : undefined;
         const servicePassword = metaEnv.VITE_SUPABASE_PASSWORD as string | undefined;
 
-        if (!serviceEmail || !servicePassword) {
-          const missing: string[] = [];
-          if (!serviceEmail) missing.push('VITE_SUPABASE_EMAIL o VITE_ADMIN_EMAIL');
-          if (!servicePassword) missing.push('VITE_SUPABASE_PASSWORD');
-
-          const detail =
-            missing.length > 0
-              ? ` Faltan variables: ${missing.join(', ')} (revise Secrets de GitHub o .env.local).`
-              : '';
-
-          // Sin credenciales de servicio: continuar solo en modo local y marcar claramente el estado.
+        // GitHub Pages cannot safely embed service credentials (VITE_* are public).
+        // If service creds exist (private hosting), use them; otherwise, fall back to user-provided email/password.
+        if (serviceEmail && servicePassword) {
+          await ensureSupabaseSession(serviceEmail, servicePassword);
+        } else if (hasUserEmail) {
+          await ensureSupabaseSession(trimmedEmail, trimmedPassword);
+        } else {
           setCloudError(
-            'Supabase configurado sin credenciales de servicio. La app funciona en modo local en este dispositivo.' +
-              detail
+            'Supabase está configurado (URL/ANON) pero no hay credenciales de inicio de sesión. Ingrese su correo en la pantalla de acceso para activar sincronización en la nube; si no, la app funcionará en modo local.'
           );
           setOrgId(null);
           return;
         }
 
-        await ensureSupabaseSession(serviceEmail, servicePassword);
         const resolvedOrgId = await getOrCreateOrgId('M&S Construcción');
         setOrgId(resolvedOrgId);
         await refreshProjects(resolvedOrgId);
