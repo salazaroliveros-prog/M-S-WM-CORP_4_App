@@ -230,30 +230,46 @@ export async function ensureOrgMembership(orgId: string, orgName = defaultOrgNam
     throw new Error('No hay sesión activa de Supabase. Inicie sesión (anon/email) antes de unirse a una organización.');
   }
 
-  const upsertMember = async () => {
+  // First, check if membership already exists (avoid UPDATE which may be blocked by RLS).
+  const existing = await supabase
+    .from('org_members')
+    .select('org_id')
+    .eq('org_id', orgId)
+    .eq('user_id', userId)
+    .limit(1);
+  if (existing.error) throw existing.error;
+  if (existing.data && existing.data.length > 0) return;
+
+  const insertMember = async () => {
     const res = await supabase
       .from('org_members')
-      .upsert({ org_id: orgId, user_id: userId }, { onConflict: 'org_id,user_id' });
-    if (res.error) throw res.error;
+      .insert({ org_id: orgId, user_id: userId });
+    if (!res.error) return;
+
+    const code = String((res.error as any)?.code || '');
+    const msg = String((res.error as any)?.message || res.error);
+
+    // Ignore unique violation: membership already exists.
+    if (code === '23505') return;
+
+    const isMissingOrg = code === '23503' || msg.toLowerCase().includes('violates foreign key') || msg.toLowerCase().includes('foreign key');
+    if (isMissingOrg) throw res.error;
+
+    const isRls = msg.toLowerCase().includes('row-level security') || msg.toLowerCase().includes('permission denied');
+    if (isRls) {
+      throw new Error(
+        'Error de seguridad al unirse a la organización en Supabase (RLS en tabla org_members). ' +
+          'Asegúrate de aplicar la migración `supabase/migrations/2026021803_reset_org_members_policies.sql` (o políticas equivalentes) y vuelve a intentar.'
+      );
+    }
+    throw res.error;
   };
 
   try {
-    await upsertMember();
+    await insertMember();
     return;
   } catch (e: any) {
-    const code = String(e?.code || '');
-    const msg = String(e?.message || e || '');
-    const isMissingOrg = code === '23503' || msg.toLowerCase().includes('violates foreign key') || msg.toLowerCase().includes('foreign key');
-    const isRls = msg.toLowerCase().includes('row-level security') || msg.toLowerCase().includes('permission denied');
-    if (!isMissingOrg) {
-      if (isRls) {
-        throw new Error(
-          'Error de seguridad al unirse a la organización en Supabase (RLS en tabla org_members). ' +
-            'Asegúrate de aplicar la migración `supabase/migrations/2026021803_reset_org_members_policies.sql` (o políticas equivalentes) y vuelve a intentar.'
-        );
-      }
-      throw e;
-    }
+    // If insert failed due to missing org FK, we'll try to create org and retry.
   }
 
   // If the org does not exist yet, create it (id is deterministic from env/config)
@@ -277,7 +293,7 @@ export async function ensureOrgMembership(orgId: string, orgName = defaultOrgNam
     }
   }
 
-  await upsertMember();
+  await insertMember();
 }
 
 export async function resolveCloudOrgId(orgName = defaultOrgName()): Promise<string> {
