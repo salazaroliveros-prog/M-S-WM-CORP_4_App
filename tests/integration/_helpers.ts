@@ -26,6 +26,13 @@ export function isRateLimitError(e: any): boolean {
   return msg.toLowerCase().includes('rate limit');
 }
 
+function envBool(name: string): boolean {
+  const v = process.env[name];
+  if (!v) return false;
+  const s = String(v).trim().toLowerCase();
+  return s === '1' || s === 'true' || s === 'yes' || s === 'on';
+}
+
 function env(name: string): string | undefined {
   const v = process.env[name];
   return v && v.trim() ? v.trim() : undefined;
@@ -65,11 +72,17 @@ export function isSchemaMissingError(e: any): boolean {
 }
 
 export async function ensureAuthOrSkip(): Promise<boolean> {
+  const requireRealtime = envBool('SUPABASE_REQUIRE_REALTIME');
   try {
     await ensureTestSession();
     return true;
   } catch (e: any) {
     if (isAnonDisabledError(e)) {
+      if (requireRealtime) {
+        throw new Error(
+          'SUPABASE_REQUIRE_REALTIME=true pero Supabase Auth no permite login anónimo. Configure SUPABASE_TEST_EMAIL y SUPABASE_TEST_PASSWORD (usuario de prueba) para ejecutar los tests de integración.'
+        );
+      }
       // eslint-disable-next-line no-console
       console.warn('Skipping: Anonymous sign-ins are disabled in Supabase Auth.');
       return false;
@@ -81,6 +94,11 @@ export async function ensureAuthOrSkip(): Promise<boolean> {
       );
     }
     if (isRateLimitError(e)) {
+      if (requireRealtime) {
+        throw new Error(
+          'SUPABASE_REQUIRE_REALTIME=true pero Supabase Auth está rate-limited. Reintente en ~1 minuto o ejecute en serie. En CI, use un usuario de prueba (SUPABASE_TEST_EMAIL/PASSWORD) para evitar depender de anon-auth.'
+        );
+      }
       // eslint-disable-next-line no-console
       console.warn('Skipping: Supabase Auth rate limit reached. Try again in a minute, or run tests serially.');
       return false;

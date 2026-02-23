@@ -11,6 +11,10 @@ node_modules
 dist
 dist-ssr
 *.local
+.env.ci
+.env.ci.*
+.env.test
+.env.test.*
 
 # Supabase local temp artifacts
 supabase/.temp/

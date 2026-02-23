@@ -752,6 +752,7 @@ const App: React.FC = () => {
   const realtimeChannelRef = useRef<any>(null);
   const realtimeBumpTimerRef = useRef<number | null>(null);
   const realtimeProjectsTimerRef = useRef<number | null>(null);
+  const realtimeResetTimerRef = useRef<number | null>(null);
 
   // Global State (Mocking a database)
   const [projects, setProjects] = useState<Project[]>([]);
@@ -816,6 +817,8 @@ const App: React.FC = () => {
       realtimeBumpTimerRef.current = null;
       if (realtimeProjectsTimerRef.current) window.clearTimeout(realtimeProjectsTimerRef.current);
       realtimeProjectsTimerRef.current = null;
+      if (realtimeResetTimerRef.current) window.clearTimeout(realtimeResetTimerRef.current);
+      realtimeResetTimerRef.current = null;
     };
 
     const scheduleBump = () => {
@@ -843,45 +846,90 @@ const App: React.FC = () => {
       );
     };
 
-    // Cleanup any previous channel (defensive).
-    try {
-      if (realtimeChannelRef.current) {
-        supabase.removeChannel(realtimeChannelRef.current);
-        realtimeChannelRef.current = null;
+    const resetChannel = () => {
+      // Cleanup any previous channel (defensive).
+      try {
+        if (realtimeChannelRef.current) {
+          supabase.removeChannel(realtimeChannelRef.current);
+          realtimeChannelRef.current = null;
+        }
+      } catch {
+        // ignore
       }
-    } catch {
-      // ignore
-    }
-    clearTimers();
+      clearTimers();
 
-    const channel = supabase.channel(`app-realtime:${orgId}`);
-    // Core + modules tables.
-    const tables = [
-      'projects',
-      'transactions',
-      'budgets',
-      'budget_lines',
-      'budget_line_materials',
-      'suppliers',
-      'requisitions',
-      'requisition_items',
-      'employees',
-      'employee_contracts',
-      'org_pay_rates',
-      'employee_rate_overrides',
-      'service_quotes',
-      'project_progress',
-      'project_progress_lines',
-      'attendance',
-      'employee_attendance_tokens',
-      'notifications',
-    ];
-    for (const t of tables) attachTable(channel, t);
+      const channel = supabase.channel(`app-realtime:${orgId}`);
+      // Core + modules tables.
+      const tables = [
+        'projects',
+        'transactions',
+        'budgets',
+        'budget_lines',
+        'budget_line_materials',
+        'suppliers',
+        'requisitions',
+        'requisition_items',
+        'employees',
+        'employee_contracts',
+        'org_pay_rates',
+        'employee_rate_overrides',
+        'service_quotes',
+        'project_progress',
+        'project_progress_lines',
+        'attendance',
+        'employee_attendance_tokens',
+        'notifications',
+      ];
+      for (const t of tables) attachTable(channel, t);
 
-    channel.subscribe();
-    realtimeChannelRef.current = channel;
+      channel.subscribe((status: any) => {
+        const s = String(status || '').toUpperCase();
+        if (s === 'SUBSCRIBED') {
+          // Ensure modules get at least one refresh after reconnect.
+          scheduleBump();
+          return;
+        }
+
+        // If the channel can't connect, retry after a short delay.
+        if (s === 'CHANNEL_ERROR' || s === 'TIMED_OUT') {
+          // Avoid hot-looping while offline.
+          const online = typeof navigator !== 'undefined' ? navigator.onLine : true;
+          if (!online) return;
+          if (realtimeResetTimerRef.current) window.clearTimeout(realtimeResetTimerRef.current);
+          realtimeResetTimerRef.current = window.setTimeout(() => {
+            resetChannel();
+          }, 1200);
+        }
+      });
+
+      realtimeChannelRef.current = channel;
+    };
+
+    const scheduleReset = () => {
+      const online = typeof navigator !== 'undefined' ? navigator.onLine : true;
+      if (!online) return;
+      if (realtimeResetTimerRef.current) window.clearTimeout(realtimeResetTimerRef.current);
+      realtimeResetTimerRef.current = window.setTimeout(() => resetChannel(), 450);
+    };
+
+    const onOnline = () => scheduleReset();
+    const onVisibility = () => {
+      try {
+        if (document.visibilityState === 'visible') scheduleReset();
+      } catch {
+        // ignore
+      }
+    };
+
+    window.addEventListener('online', onOnline);
+    document.addEventListener('visibilitychange', onVisibility);
+
+    resetChannel();
 
     return () => {
+      window.removeEventListener('online', onOnline);
+      document.removeEventListener('visibilitychange', onVisibility);
+
       clearTimers();
       try {
         if (realtimeChannelRef.current) {

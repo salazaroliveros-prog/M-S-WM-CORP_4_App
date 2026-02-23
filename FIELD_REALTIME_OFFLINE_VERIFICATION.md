@@ -10,6 +10,9 @@ Este checklist valida que **una app instalada (PWA) en otro dispositivo**:
 - Ambos dispositivos deben quedar trabajando sobre **la misma organización (`org_id`)**.
   - Si usas **el mismo usuario de Supabase** en ambos: OK.
   - Si usas **usuarios distintos**: el segundo debe ser **miembro** en `org_members` del mismo `org_id` (owner/admin lo agrega).
+- La build debe tener **sincronización nube** habilitada.
+  - Variables requeridas: `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY`
+  - Flag requerido: `VITE_ENABLE_CLOUD_LOGIN=true` (si no, la app opera como “Modo local” aunque tenga internet)
 - Supabase Realtime debe estar habilitado para las tablas usadas.
   - Dashboard: *Database → Replication → Realtime* (activar tablas), o ejecutar el script:
     - `supabase/scripts/enable_realtime_publication.sql`

@@ -52,6 +52,11 @@ En algunos entornos Windows, aunque `nvm` esté instalado, PowerShell puede no e
     - [supabase/scripts/bootstrap_test_user_org.sql](supabase/scripts/bootstrap_test_user_org.sql)
   - Luego ejecute: `npm run test:supabase`
 
+CI (GitHub Actions):
+- Workflow: [.github/workflows/ci.yml](.github/workflows/ci.yml)
+- Ejemplo de variables: [.env.ci.example](.env.ci.example)
+- Para ejecutar integración en CI, configure Secrets: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `SUPABASE_TEST_EMAIL`, `SUPABASE_TEST_PASSWORD`.
+
 ### Realtime (opcional)
 
 Por defecto, Supabase Realtime se habilita **por tabla**. Si quieres suscripciones en tiempo real desde `supabase-js` (canales `postgres_changes`):
@@ -61,6 +66,8 @@ Por defecto, Supabase Realtime se habilita **por tabla**. Si quieres suscripcion
 
 El repo incluye un test opcional: [tests/integration/supabase.realtime.integration.test.ts](tests/integration/supabase.realtime.integration.test.ts). Por defecto solo avisa con `console.warn` si no llegan eventos.
 Si quieres que falle cuando no haya Realtime, define `SUPABASE_REQUIRE_REALTIME=true` y corre `npm run test:supabase`.
+
+Nota: en **CI** (por ejemplo GitHub Actions), `SUPABASE_REQUIRE_REALTIME` se activa por defecto para evitar falsos positivos. En ese caso debes configurar un usuario de prueba (`SUPABASE_TEST_EMAIL`/`SUPABASE_TEST_PASSWORD`) si el login anónimo está deshabilitado.
 
 En PowerShell:
 
