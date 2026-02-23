@@ -1573,38 +1573,32 @@ const App: React.FC = () => {
     const trimmedEmail = String(email || '').trim();
     const hasUserEmail = Boolean(trimmedEmail);
 
+    const metaEnv = ((import.meta as any).env ?? {}) as Record<string, any>;
+    const enableCloudLogin = String(metaEnv.VITE_ENABLE_CLOUD_LOGIN || '').trim().toLowerCase() === 'true';
+
     // Login 100% local por dispositivo, usando localStorage
     const existingPassword = localStorage.getItem(LOCAL_PASSWORD_KEY);
     if (!existingPassword) {
       // Primera vez en este dispositivo: registra la contraseña ingresada
       localStorage.setItem(LOCAL_PASSWORD_KEY, trimmedPassword);
     } else if (existingPassword !== trimmedPassword) {
-      // If user provided an email and Supabase is configured, allow cloud sign-in attempt.
-      // This avoids being locked out on GitHub Pages (no embedded service credentials).
-      if (isSupabaseConfigured && hasUserEmail) {
-        try {
-          await ensureSupabaseSession(trimmedEmail, trimmedPassword);
-          // Align local device password with the provided credentials.
-          localStorage.setItem(LOCAL_PASSWORD_KEY, trimmedPassword);
-        } catch {
-          const err = new Error('Contraseña incorrecta para este dispositivo.');
-          throw err;
-        }
-      } else {
-        const err = new Error('Contraseña incorrecta para este dispositivo.');
-        throw err;
-      }
+      const err = new Error('Contraseña incorrecta para este dispositivo.');
+      throw err;
     }
 
     // En este punto el login local fue exitoso
     setIsAuthenticated(true);
     setCurrentView('INICIO');
 
+    // Local-only por defecto. Para habilitar sincronización/login cloud en Supabase,
+    // defina VITE_ENABLE_CLOUD_LOGIN=true en build time.
+    setCloudError(null);
+    setOrgId(null);
+
     // Inicializa sesión de Supabase en segundo plano con una cuenta técnica fija
-    if (isSupabaseConfigured) {
+    if (isSupabaseConfigured && enableCloudLogin) {
       try {
         setCloudError(null);
-        const metaEnv = ((import.meta as any).env ?? {}) as Record<string, any>;
         // Preferimos VITE_SUPABASE_EMAIL, pero si viene vacío usamos VITE_ADMIN_EMAIL
         const rawEmail = (metaEnv.VITE_SUPABASE_EMAIL || metaEnv.VITE_ADMIN_EMAIL) as
           | string
@@ -1681,6 +1675,8 @@ const App: React.FC = () => {
   const handleLogout = () => {
     setIsAuthenticated(false);
     setCurrentView('WELCOME');
+    setOrgId(null);
+    setCloudError(null);
   };
 
   const handleQuickBuy = (data: RequisitionData) => {

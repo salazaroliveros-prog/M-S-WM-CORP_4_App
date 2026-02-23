@@ -130,6 +130,8 @@ Este repo está configurado para desplegarse automáticamente a GitHub Pages con
 2) Hacer push a `main`.
 3) El workflow publicará la carpeta `dist/`.
 
+Nota: el **login es local por dispositivo** por defecto (ideal para GitHub Pages). La sincronización/login en Supabase es **opcional** y está desactivada a menos que habilites `VITE_ENABLE_CLOUD_LOGIN=true` en build time.
+
 ### Supabase en GitHub Pages (config permanente)
 
 En GitHub Pages no existe `.env.local` en runtime; Vite necesita las variables en **build time**.
@@ -140,6 +142,8 @@ Configure estos **Secrets** en GitHub:
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_ANON_KEY` (solo ANON, nunca Service Role)
 - (Opcional) `VITE_ORG_NAME`
+
+Si quieres habilitar sincronización cloud, además define `VITE_ENABLE_CLOUD_LOGIN=true` (como variable/secret) y usa tu correo/contraseña en la pantalla de acceso.
 
 Ruta: **Settings → Secrets and variables → Actions → New repository secret**.
 
