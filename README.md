@@ -18,6 +18,8 @@ View your app in AI Studio: https://ai.studio/apps/temp/2
 2. (Opcional) Configurar Supabase para CRUD real:
    - Copie [.env.local.example](.env.local.example) a `.env.local` y complete `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY`.
    - En Supabase Auth, habilite **Anonymous sign-ins** (o reemplace por un login real).
+   - Para que **varios dispositivos** vean los mismos datos, defina también `VITE_ORG_ID` (un UUID de `public.organizations.id`).
+     - Si no lo define, cada dispositivo puede crear/usar una organización distinta y no sincronizarán entre sí.
     - Aplique la migración SQL en `supabase/migrations/20260204_init.sql`.
       - (Opcional) Para registrar **costos reales por material (factura)** aplique también:
          - [supabase/migrations/20260209_requisition_items_actual_unit_cost.sql](supabase/migrations/20260209_requisition_items_actual_unit_cost.sql)
@@ -170,22 +172,23 @@ Este repo está configurado para desplegarse automáticamente a GitHub Pages con
 2) Hacer push a `main`.
 3) El workflow publicará la carpeta `dist/`.
 
-Nota: el **login es local por dispositivo** por defecto (ideal para GitHub Pages). La sincronización/login en Supabase es **opcional**: el build habilita `VITE_ENABLE_CLOUD_LOGIN=true`, pero solo conectará a Supabase si ingresas tu correo/contraseña (o si ya existe una sesión persistida en ese dispositivo).
+Nota: el **login es local por dispositivo** por defecto (ideal para GitHub Pages). La sincronización en Supabase es **opcional**: el build habilita `VITE_ENABLE_CLOUD_LOGIN=true` y la app se conecta con una **sesión anónima** por dispositivo. Para que varios dispositivos compartan datos/realtime, define `VITE_ORG_ID`.
 
 ### Supabase en GitHub Pages (config permanente)
 
 En GitHub Pages no existe `.env.local` en runtime; Vite necesita las variables en **build time**.
 
 Este repo ya soporta esto con el workflow `.github/workflows/deploy-pages.yml`.
-Configure estos **Secrets** en GitHub:
+Configure estas **Variables/Secrets** en GitHub:
 
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_ANON_KEY` (solo ANON, nunca Service Role)
+- `VITE_ORG_ID` (recomendado para multi-dispositivo)
 - (Opcional) `VITE_ORG_NAME`
 
-Para sincronización cloud (CRUD real), usa tu correo/contraseña en la pantalla de acceso (o una sesión ya persistida). Si quieres deshabilitarlo, remueve/ajusta `VITE_ENABLE_CLOUD_LOGIN` en el workflow.
+Para sincronización cloud (CRUD real), define `VITE_ORG_ID` y habilita Anonymous sign-ins en Supabase. Si quieres deshabilitarlo, remueve/ajusta `VITE_ENABLE_CLOUD_LOGIN` en el workflow.
 
-Ruta: **Settings → Secrets and variables → Actions → New repository secret**.
+Ruta: **Settings → Secrets and variables → Actions**.
 
 Luego haga push a `main` para re-deploy.
 

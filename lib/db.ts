@@ -138,6 +138,42 @@ function defaultOrgName(): string {
   return name && String(name).trim() ? String(name).trim() : 'M&S Construcción';
 }
 
+function configuredOrgId(): string | null {
+  const metaEnv = (import.meta as any).env as Record<string, any> | undefined;
+  const env = metaEnv ?? (process.env as Record<string, any> | undefined) ?? {};
+  const raw =
+    (env.VITE_ORG_ID as string | undefined) ??
+    (env.SUPABASE_TEST_ORG_ID as string | undefined) ??
+    (env.SUPABASE_ORG_ID as string | undefined);
+  const value = raw && String(raw).trim() ? String(raw).trim() : '';
+  return value ? value : null;
+}
+
+export async function ensureSupabaseAnonymousSession(): Promise<void> {
+  const supabase = getSupabaseClient();
+  const { data } = await supabase.auth.getSession();
+  if (data.session?.access_token) return;
+
+  const res = await supabase.auth.signInAnonymously();
+  if (res.error) {
+    throw new Error(
+      `No se pudo iniciar sesión anónima en Supabase. Habilita "Anonymous sign-ins" en Supabase Auth, o usa un método de login real. Detalle: ${res.error.message}`
+    );
+  }
+
+  const deadline = Date.now() + 2500;
+  while (Date.now() < deadline) {
+    const verify = await supabase.auth.getSession();
+    if (verify.data.session?.access_token) {
+      const userRes = await supabase.auth.getUser();
+      if (userRes.data.user?.id) return;
+    }
+    await new Promise((r) => setTimeout(r, 150));
+  }
+
+  throw new Error('No se pudo establecer sesión anónima de Supabase (token no disponible).');
+}
+
 export async function ensureSupabaseSession(email: string, password: string): Promise<void> {
   const supabase = getSupabaseClient();
   const { data } = await supabase.auth.getSession();
@@ -178,6 +214,79 @@ export async function ensureSupabaseSession(email: string, password: string): Pr
   }
 
   throw new Error('No se pudo establecer sesión de Supabase (token no disponible).');
+}
+
+export function getConfiguredOrgId(): string | null {
+  return configuredOrgId();
+}
+
+export async function ensureOrgMembership(orgId: string, orgName = defaultOrgName()): Promise<void> {
+  const supabase = getSupabaseClient();
+  requireNonEmpty(orgId, 'orgId');
+
+  const userRes = await supabase.auth.getUser();
+  const userId = userRes.data.user?.id;
+  if (!userId) {
+    throw new Error('No hay sesión activa de Supabase. Inicie sesión (anon/email) antes de unirse a una organización.');
+  }
+
+  const upsertMember = async () => {
+    const res = await supabase
+      .from('org_members')
+      .upsert({ org_id: orgId, user_id: userId }, { onConflict: 'org_id,user_id' });
+    if (res.error) throw res.error;
+  };
+
+  try {
+    await upsertMember();
+    return;
+  } catch (e: any) {
+    const code = String(e?.code || '');
+    const msg = String(e?.message || e || '');
+    const isMissingOrg = code === '23503' || msg.toLowerCase().includes('violates foreign key') || msg.toLowerCase().includes('foreign key');
+    const isRls = msg.toLowerCase().includes('row-level security') || msg.toLowerCase().includes('permission denied');
+    if (!isMissingOrg) {
+      if (isRls) {
+        throw new Error(
+          'Error de seguridad al unirse a la organización en Supabase (RLS en tabla org_members). ' +
+            'Asegúrate de aplicar la migración `supabase/migrations/2026021803_reset_org_members_policies.sql` (o políticas equivalentes) y vuelve a intentar.'
+        );
+      }
+      throw e;
+    }
+  }
+
+  // If the org does not exist yet, create it (id is deterministic from env/config)
+  const createOrg = await supabase
+    .from('organizations')
+    .insert({ id: orgId, name: orgName, created_by: userId });
+
+  if (createOrg.error) {
+    const code = String((createOrg.error as any)?.code || '');
+    const msg = String((createOrg.error as any)?.message || createOrg.error);
+    // Ignore unique violation: org already exists (created by another device)
+    if (code !== '23505') {
+      const isRls = msg.toLowerCase().includes('row-level security') || msg.toLowerCase().includes('permission denied');
+      if (isRls) {
+        throw new Error(
+          'Error de seguridad al crear la organización en Supabase (RLS en tabla organizations). ' +
+            'Revisa las políticas `organizations_insert`/`organizations_select` y vuelve a intentar.'
+        );
+      }
+      throw createOrg.error;
+    }
+  }
+
+  await upsertMember();
+}
+
+export async function resolveCloudOrgId(orgName = defaultOrgName()): Promise<string> {
+  const orgId = configuredOrgId();
+  if (orgId) {
+    await ensureOrgMembership(orgId, orgName);
+    return orgId;
+  }
+  return await getOrCreateOrgId(orgName);
 }
 
 export async function getOrCreateOrgId(orgName = defaultOrgName()): Promise<string> {

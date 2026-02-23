@@ -48,15 +48,15 @@ jobs:
           # Optional: inject public Supabase config for GitHub Pages builds.
           # Add these in GitHub repo Settings -> Secrets and variables -> Actions.
           # NOTE: Only use the public ANON key here.
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-          # Cloud login/sync is opt-in at runtime (user must provide email/password).
-          # Setting this to true at build time allows installed PWAs to connect to Supabase when credentials exist.
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL || secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY || secrets.VITE_SUPABASE_ANON_KEY }}
+          # Cloud sync is opt-in at build time.
+          # When enabled, the app uses an anonymous Supabase session per device.
           VITE_ENABLE_CLOUD_LOGIN: 'true'
           # WARNING: cualquier variable que empiece con VITE_ queda embebida en el JS
           # del frontend. No inyectes credenciales (email/password) en GitHub Pages.
-          VITE_ADMIN_EMAIL: ${{ secrets.VITE_ADMIN_EMAIL }}
-          VITE_ORG_NAME: ${{ secrets.VITE_ORG_NAME }}
+          VITE_ORG_ID: ${{ vars.VITE_ORG_ID || secrets.VITE_ORG_ID }}
+          VITE_ORG_NAME: ${{ vars.VITE_ORG_NAME || secrets.VITE_ORG_NAME }}
         run: npm run build:pages
 
       - name: Setup Pages

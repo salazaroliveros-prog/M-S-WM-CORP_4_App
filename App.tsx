@@ -3,8 +3,9 @@ import { LayoutDashboard, Wallet, HardHat, FileText, Activity, ShoppingCart, Use
 import { ViewState, Project, RequisitionData, QuoteInitialData } from './types';
 import { getSupabaseClient, isSupabaseConfigured } from './lib/supabaseClient';
 import {
-  ensureSupabaseSession,
-  getOrCreateOrgId,
+  ensureSupabaseAnonymousSession,
+  getConfiguredOrgId,
+  resolveCloudOrgId,
   listProjects,
   createProject as dbCreateProject,
   updateProject as dbUpdateProject,
@@ -2238,35 +2239,18 @@ const App: React.FC = () => {
     if (isSupabaseConfigured && enableCloudLogin) {
       try {
         setCloudError(null);
-        // Preferimos VITE_SUPABASE_EMAIL, pero si viene vacío usamos VITE_ADMIN_EMAIL
-        const rawEmail = (metaEnv.VITE_SUPABASE_EMAIL || metaEnv.VITE_ADMIN_EMAIL) as
-          | string
-          | undefined;
-        const serviceEmail = rawEmail && String(rawEmail).trim() ? String(rawEmail).trim() : undefined;
-        const servicePassword = metaEnv.VITE_SUPABASE_PASSWORD as string | undefined;
+        setCloudLoginAttempted(true);
 
-        const supabase = getSupabaseClient();
-        const existingSession = await supabase.auth.getSession();
-        const hasSession = Boolean(existingSession.data.session?.access_token);
+        // Login cloud SIN credenciales: usamos una sesión anónima por dispositivo.
+        // Esto permite CRUD/Realtime bajo RLS sin pedir email/contraseña de Supabase.
+        await ensureSupabaseAnonymousSession();
 
-        // GitHub Pages cannot safely embed service credentials (VITE_* are public).
-        // If service creds exist (private hosting), use them; otherwise, fall back to user-provided email/password.
-        if (serviceEmail && servicePassword) {
-          setCloudLoginAttempted(true);
-          await ensureSupabaseSession(serviceEmail, servicePassword);
-        } else if (hasSession) {
-          setCloudLoginAttempted(true);
-          // Session already persisted; no need to ask for credentials again.
-        } else if (hasUserEmail) {
-          setCloudLoginAttempted(true);
-          await ensureSupabaseSession(trimmedEmail, trimmedPassword);
-        } else {
-          // No credentials and no existing session: stay local without showing an error.
-          setCloudLoginAttempted(false);
-          return;
+        const desiredOrgId = getConfiguredOrgId();
+        if (!desiredOrgId) {
+          console.warn('VITE_ORG_ID no está configurado; cada dispositivo puede crear/usar una organización distinta.');
         }
 
-        const resolvedOrgId = await getOrCreateOrgId('M&S Construcción');
+        const resolvedOrgId = await resolveCloudOrgId('M&S Construcción');
         setOrgId(resolvedOrgId);
         await refreshProjects(resolvedOrgId);
         await Promise.all([
@@ -2359,6 +2343,13 @@ const App: React.FC = () => {
   };
 
   const handleLogout = () => {
+    if (isSupabaseConfigured) {
+      try {
+        void getSupabaseClient().auth.signOut();
+      } catch {
+        // ignore
+      }
+    }
     setIsAuthenticated(false);
     setCurrentView('WELCOME');
     setOrgId(null);
