@@ -9,6 +9,11 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      VITE_SUPABASE_URL: ${{ secrets['VITE_SUPABASE_URL'] }}
+      VITE_SUPABASE_ANON_KEY: ${{ secrets['VITE_SUPABASE_ANON_KEY'] }}
+      SUPABASE_TEST_EMAIL: ${{ secrets['SUPABASE_TEST_EMAIL'] }}
+      SUPABASE_TEST_PASSWORD: ${{ secrets['SUPABASE_TEST_PASSWORD'] }}
 
     steps:
       - name: Checkout
@@ -35,11 +40,7 @@ jobs:
 
       - name: Supabase integration tests (requires secrets)
         # Note: secrets are not available on PRs from forks.
-        if: ${{ secrets.VITE_SUPABASE_URL != '' && secrets.VITE_SUPABASE_ANON_KEY != '' && secrets.SUPABASE_TEST_EMAIL != '' && secrets.SUPABASE_TEST_PASSWORD != '' }}
+        if: ${{ env.VITE_SUPABASE_URL != '' && env.VITE_SUPABASE_ANON_KEY != '' && env.SUPABASE_TEST_EMAIL != '' && env.SUPABASE_TEST_PASSWORD != '' }}
         env:
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-          SUPABASE_TEST_EMAIL: ${{ secrets.SUPABASE_TEST_EMAIL }}
-          SUPABASE_TEST_PASSWORD: ${{ secrets.SUPABASE_TEST_PASSWORD }}
           SUPABASE_REQUIRE_REALTIME: "true"
         run: npm run test:supabase
