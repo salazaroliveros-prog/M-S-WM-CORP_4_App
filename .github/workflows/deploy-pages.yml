@@ -44,6 +44,9 @@ jobs:
           # NOTE: Only use the public ANON key here.
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          # Cloud login/sync is opt-in at runtime (user must provide email/password).
+          # Setting this to true at build time allows installed PWAs to connect to Supabase when credentials exist.
+          VITE_ENABLE_CLOUD_LOGIN: 'true'
           # WARNING: cualquier variable que empiece con VITE_ queda embebida en el JS
           # del frontend. No inyectes credenciales (email/password) en GitHub Pages.
           VITE_ADMIN_EMAIL: ${{ secrets.VITE_ADMIN_EMAIL }}

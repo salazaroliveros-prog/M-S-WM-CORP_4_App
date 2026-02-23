@@ -747,6 +747,7 @@ const App: React.FC = () => {
 
   const [orgId, setOrgId] = useState<string | null>(null);
   const [cloudError, setCloudError] = useState<string | null>(null);
+  const [cloudLoginAttempted, setCloudLoginAttempted] = useState(false);
 
   const [syncVersion, setSyncVersion] = useState(0);
   const realtimeChannelRef = useRef<any>(null);
@@ -2231,8 +2232,9 @@ const App: React.FC = () => {
     // defina VITE_ENABLE_CLOUD_LOGIN=true en build time.
     setCloudError(null);
     setOrgId(null);
+    setCloudLoginAttempted(false);
 
-    // Inicializa sesión de Supabase en segundo plano con una cuenta técnica fija
+    // Inicializa sesión de Supabase (si está configurado y habilitado en build-time)
     if (isSupabaseConfigured && enableCloudLogin) {
       try {
         setCloudError(null);
@@ -2243,17 +2245,24 @@ const App: React.FC = () => {
         const serviceEmail = rawEmail && String(rawEmail).trim() ? String(rawEmail).trim() : undefined;
         const servicePassword = metaEnv.VITE_SUPABASE_PASSWORD as string | undefined;
 
+        const supabase = getSupabaseClient();
+        const existingSession = await supabase.auth.getSession();
+        const hasSession = Boolean(existingSession.data.session?.access_token);
+
         // GitHub Pages cannot safely embed service credentials (VITE_* are public).
         // If service creds exist (private hosting), use them; otherwise, fall back to user-provided email/password.
         if (serviceEmail && servicePassword) {
+          setCloudLoginAttempted(true);
           await ensureSupabaseSession(serviceEmail, servicePassword);
+        } else if (hasSession) {
+          setCloudLoginAttempted(true);
+          // Session already persisted; no need to ask for credentials again.
         } else if (hasUserEmail) {
+          setCloudLoginAttempted(true);
           await ensureSupabaseSession(trimmedEmail, trimmedPassword);
         } else {
-          setCloudError(
-            'Supabase está configurado (URL/ANON) pero no hay credenciales de inicio de sesión. Ingrese su correo en la pantalla de acceso para activar sincronización en la nube; si no, la app funcionará en modo local.'
-          );
-          setOrgId(null);
+          // No credentials and no existing session: stay local without showing an error.
+          setCloudLoginAttempted(false);
           return;
         }
 
@@ -2284,6 +2293,7 @@ const App: React.FC = () => {
       } catch (e: any) {
         console.error(e);
         const msg = e?.message || 'Error inicializando Supabase para datos en la nube. La app seguirá funcionando en modo local en este dispositivo.';
+        setCloudLoginAttempted(true);
         setCloudError(msg);
       }
     }
@@ -2353,6 +2363,7 @@ const App: React.FC = () => {
     setCurrentView('WELCOME');
     setOrgId(null);
     setCloudError(null);
+    setCloudLoginAttempted(false);
   };
 
   const handleQuickBuy = (data: RequisitionData) => {
@@ -2438,9 +2449,11 @@ const App: React.FC = () => {
               ? 'Error nube · usando modo local'
               : !isSupabaseConfigured
                 ? 'Modo local (sin nube)'
-                : orgId
-                  ? 'Nube sincronizada'
-                  : 'Conectando con nube...'}
+                : !cloudLoginAttempted
+                  ? 'Modo local (sin nube)'
+                  : orgId
+                    ? 'Nube sincronizada'
+                    : 'Conectando con nube...'}
           </div>
         </div>
         <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
@@ -2508,6 +2521,10 @@ const App: React.FC = () => {
                      Error nube · modo local
                    </span>
                  ) : !isSupabaseConfigured ? (
+                   <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-gray-100 text-gray-700 border border-gray-200">
+                     Modo local (sin nube)
+                   </span>
+                 ) : !cloudLoginAttempted ? (
                    <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-gray-100 text-gray-700 border border-gray-200">
                      Modo local (sin nube)
                    </span>

@@ -183,7 +183,8 @@ const WelcomeScreen: React.FC<Props> = ({ onLogin }) => {
             )}
 
             <p className="text-[10px] text-gray-500 mt-2">
-              Esta contraseña se guarda solo en este dispositivo y no se envía a Supabase ni a la nube.
+              La contraseña se guarda en este dispositivo. Si ingresas tu correo y la nube está habilitada,
+              se usará también para iniciar sesión en Supabase y sincronizar datos.
             </p>
           </div>
         </form>
