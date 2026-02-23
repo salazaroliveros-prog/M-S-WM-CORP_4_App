@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { LayoutDashboard, Wallet, HardHat, FileText, Activity, ShoppingCart, Users, Calculator, LogOut, Menu, X, Lock } from 'lucide-react';
 import { ViewState, Project, RequisitionData, QuoteInitialData } from './types';
-import { isSupabaseConfigured } from './lib/supabaseClient';
+import { getSupabaseClient, isSupabaseConfigured } from './lib/supabaseClient';
 import {
   ensureSupabaseSession,
   getOrCreateOrgId,
@@ -63,10 +63,94 @@ import ContractIntake from './components/ContractIntake';
 const LOCAL_PASSWORD_KEY = 'ms_local_admin_password_v1';
 const LOCAL_TRANSACTIONS_KEY = 'transactions';
 const PENDING_TRANSACTIONS_KEY = 'wm_pending_transactions_v1';
+const LOCAL_PROJECTS_KEY = 'wm_offline_projects_v1';
+const PENDING_PROJECTS_KEY = 'wm_pending_projects_v1';
 const LOCAL_REQUISITIONS_KEY = 'wm_offline_requisitions_v1';
 const PENDING_REQUISITIONS_KEY = 'wm_pending_requisitions_v1';
+const LOCAL_REQUISITION_ITEMS_KEY = 'wm_offline_requisition_items_v1';
+const LOCAL_REQUISITION_ID_MAP_KEY = 'wm_requisition_id_map_v1';
 const LOCAL_EMPLOYEES_KEY = 'wm_offline_employees_v1';
 const PENDING_EMPLOYEES_KEY = 'wm_pending_employees_v1';
+
+const OFFLINE_BUDGET_KEY = (projectId: string) => `wm_budget_v1_${projectId}`;
+const PENDING_BUDGETS_KEY = 'wm_pending_budgets_v1';
+
+const OFFLINE_PROGRESS_KEY = (projectId: string) => `wm_progress_v1_${projectId}`;
+const PENDING_PROGRESS_KEY = 'wm_pending_progress_v1';
+
+const LOCAL_SUPPLIERS_KEY = 'wm_offline_suppliers_v1';
+const PENDING_SUPPLIERS_KEY = 'wm_pending_suppliers_v1';
+
+const LOCAL_QUOTES_KEY = 'wm_offline_quotes_v1';
+const PENDING_QUOTES_KEY = 'wm_pending_quotes_v1';
+
+const STORAGE_PAY_RATES = 'wm_pay_rates_v1';
+const STORAGE_EMPLOYEE_OVERRIDES = 'wm_employee_overrides_v1';
+const STORAGE_CONTRACTS = 'wm_contract_records_v1';
+
+const PENDING_PAY_RATES_KEY = 'wm_pending_pay_rates_v1';
+const PENDING_EMPLOYEE_OVERRIDES_KEY = 'wm_pending_employee_overrides_v1';
+const PENDING_CONTRACTS_KEY = 'wm_pending_contracts_v1';
+
+const LOCAL_ATTENDANCE_MANUAL_KEY = 'wm_offline_attendance_manual_v1';
+const PENDING_ATTENDANCE_MANUAL_KEY = 'wm_pending_attendance_manual_v1';
+const PENDING_ATTENDANCE_TOKENS_KEY = 'wm_pending_attendance_tokens_v1';
+
+const PENDING_REQUISITION_STATUS_KEY = 'wm_pending_requisition_status_v1';
+const PENDING_REQUISITION_ACTUAL_COSTS_KEY = 'wm_pending_requisition_actual_costs_v1';
+
+type Json = any;
+
+function readJson<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJson(key: string, value: Json) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // ignore
+  }
+}
+
+function readObject(key: string): Record<string, any> {
+  const v = readJson<any>(key, {});
+  return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, any>) : {};
+}
+
+function mapRequisitionId(requisitionId: string): string {
+  if (!requisitionId) return requisitionId;
+  const map = readObject(LOCAL_REQUISITION_ID_MAP_KEY);
+  const mapped = map[String(requisitionId)];
+  return mapped ? String(mapped) : requisitionId;
+}
+
+function setRequisitionIdMapping(localId: string, remoteId: string) {
+  if (!localId || !remoteId || localId === remoteId) return;
+  const map = readObject(LOCAL_REQUISITION_ID_MAP_KEY);
+  map[String(localId)] = String(remoteId);
+  writeJson(LOCAL_REQUISITION_ID_MAP_KEY, map);
+}
+
+function upsertById<T extends { id: string }>(rows: T[], row: T): T[] {
+  const idx = rows.findIndex((r) => r.id === row.id);
+  if (idx >= 0) {
+    const next = [...rows];
+    next[idx] = row;
+    return next;
+  }
+  return [row, ...rows];
+}
+
+function uniq<T>(arr: T[]): T[] {
+  return Array.from(new Set(arr));
+}
 
 const syncOfflineTransactions = async (targetOrgId: string) => {
   try {
@@ -91,6 +175,210 @@ const syncOfflineTransactions = async (targetOrgId: string) => {
   }
 };
 
+const syncOfflineBudgets = async (targetOrgId: string) => {
+  const pendingProjectIds = readJson<string[]>(PENDING_BUDGETS_KEY, []);
+  if (!Array.isArray(pendingProjectIds) || pendingProjectIds.length === 0) return;
+
+  const stillPending: string[] = [];
+  for (const projectId of uniq(pendingProjectIds)) {
+    try {
+      const payload = readJson<any | null>(OFFLINE_BUDGET_KEY(projectId), null);
+      if (!payload) continue;
+      await saveBudgetForProject(targetOrgId, projectId, String(payload.typology || ''), String(payload.indirectPct || '0'), payload.lines || []);
+    } catch (e) {
+      console.error('Error sincronizando presupuesto pendiente', e);
+      stillPending.push(projectId);
+    }
+  }
+
+  writeJson(PENDING_BUDGETS_KEY, uniq(stillPending));
+};
+
+const syncOfflineProgress = async (targetOrgId: string) => {
+  const pendingProjectIds = readJson<string[]>(PENDING_PROGRESS_KEY, []);
+  if (!Array.isArray(pendingProjectIds) || pendingProjectIds.length === 0) return;
+
+  const stillPending: string[] = [];
+  for (const projectId of uniq(pendingProjectIds)) {
+    try {
+      const payload = readJson<any | null>(OFFLINE_PROGRESS_KEY(projectId), null);
+      if (!payload) continue;
+      await saveProgressForProject(targetOrgId, projectId, payload);
+    } catch (e) {
+      console.error('Error sincronizando avance pendiente', e);
+      stillPending.push(projectId);
+    }
+  }
+
+  writeJson(PENDING_PROGRESS_KEY, uniq(stillPending));
+};
+
+const syncOfflineSuppliers = async (targetOrgId: string) => {
+  const ops = readJson<any[]>(PENDING_SUPPLIERS_KEY, []);
+  if (!Array.isArray(ops) || ops.length === 0) return;
+
+  const stillPending: any[] = [];
+  for (const op of ops) {
+    try {
+      if (op?.type === 'delete' && op?.id) {
+        await deleteSupplier(targetOrgId, String(op.id));
+      } else if (op?.type === 'upsert' && op?.supplier) {
+        await upsertSupplier(targetOrgId, op.supplier);
+      }
+    } catch (e) {
+      console.error('Error sincronizando proveedor pendiente', e);
+      stillPending.push(op);
+    }
+  }
+  writeJson(PENDING_SUPPLIERS_KEY, stillPending);
+};
+
+const syncOfflineQuotes = async (targetOrgId: string) => {
+  const ops = readJson<any[]>(PENDING_QUOTES_KEY, []);
+  if (!Array.isArray(ops) || ops.length === 0) return;
+
+  const stillPending: any[] = [];
+  for (const op of ops) {
+    try {
+      if (op?.type === 'delete' && op?.id) {
+        await deleteServiceQuote(targetOrgId, String(op.id));
+      } else if (op?.type === 'upsert' && op?.quote) {
+        await upsertServiceQuote(targetOrgId, op.quote);
+      }
+    } catch (e) {
+      console.error('Error sincronizando cotización pendiente', e);
+      stillPending.push(op);
+    }
+  }
+  writeJson(PENDING_QUOTES_KEY, stillPending);
+};
+
+const syncOfflinePayRates = async (targetOrgId: string) => {
+  const pending = readJson<any | null>(PENDING_PAY_RATES_KEY, null);
+  if (!pending) return;
+  try {
+    await upsertOrgPayRates(targetOrgId, pending);
+    localStorage.removeItem(PENDING_PAY_RATES_KEY);
+  } catch (e) {
+    console.error('Error sincronizando pay rates pendientes', e);
+  }
+};
+
+const syncOfflineEmployeeOverrides = async (targetOrgId: string) => {
+  const ops = readJson<any[]>(PENDING_EMPLOYEE_OVERRIDES_KEY, []);
+  if (!Array.isArray(ops) || ops.length === 0) return;
+
+  const stillPending: any[] = [];
+  for (const op of ops) {
+    try {
+      if (op?.type === 'delete' && op?.employeeId) {
+        await deleteEmployeeRateOverride(targetOrgId, String(op.employeeId));
+      } else if (op?.type === 'upsert' && op?.employeeId && op?.dailyRate != null) {
+        await upsertEmployeeRateOverride(targetOrgId, String(op.employeeId), Number(op.dailyRate));
+      }
+    } catch (e) {
+      console.error('Error sincronizando override pendiente', e);
+      stillPending.push(op);
+    }
+  }
+  writeJson(PENDING_EMPLOYEE_OVERRIDES_KEY, stillPending);
+};
+
+const syncOfflineContracts = async (targetOrgId: string) => {
+  const pending = readJson<any[]>(PENDING_CONTRACTS_KEY, []);
+  if (!Array.isArray(pending) || pending.length === 0) return;
+
+  const stillPending: any[] = [];
+  for (const rec of pending) {
+    try {
+      await upsertEmployeeContract(targetOrgId, rec);
+    } catch (e) {
+      console.error('Error sincronizando contrato pendiente', e);
+      stillPending.push(rec);
+    }
+  }
+  writeJson(PENDING_CONTRACTS_KEY, stillPending);
+};
+
+const syncOfflineAttendanceTokens = async () => {
+  const pending = readJson<any[]>(PENDING_ATTENDANCE_TOKENS_KEY, []);
+  if (!Array.isArray(pending) || pending.length === 0) return;
+
+  const stillPending: any[] = [];
+  for (const entry of pending) {
+    try {
+      if (!entry?.employeeId || !entry?.token) continue;
+      await setEmployeeAttendanceToken(String(entry.employeeId), String(entry.token));
+    } catch (e) {
+      console.error('Error sincronizando token de asistencia pendiente', e);
+      stillPending.push(entry);
+    }
+  }
+  writeJson(PENDING_ATTENDANCE_TOKENS_KEY, stillPending);
+};
+
+const syncOfflineAttendanceManual = async (targetOrgId: string) => {
+  const ops = readJson<any[]>(PENDING_ATTENDANCE_MANUAL_KEY, []);
+  if (!Array.isArray(ops) || ops.length === 0) return;
+
+  const stillPending: any[] = [];
+  for (const op of ops) {
+    try {
+      const supabase = getSupabaseClient();
+      if (op?.type === 'delete' && op?.id) {
+        const res = await supabase.from('attendance').delete().eq('org_id', targetOrgId).eq('id', String(op.id));
+        if ((res as any).error) throw (res as any).error;
+      } else if (op?.type === 'upsert' && op?.row) {
+        const row = { ...op.row, org_id: targetOrgId };
+        const res = await supabase.from('attendance').upsert([row], { onConflict: 'org_id,id' });
+        if ((res as any).error) throw (res as any).error;
+      }
+    } catch (e) {
+      console.error('Error sincronizando asistencia manual pendiente', e);
+      stillPending.push(op);
+    }
+  }
+  writeJson(PENDING_ATTENDANCE_MANUAL_KEY, stillPending);
+};
+
+const syncOfflineRequisitionMutations = async (targetOrgId: string) => {
+  const statusOps = readJson<any[]>(PENDING_REQUISITION_STATUS_KEY, []);
+  const costOps = readJson<any[]>(PENDING_REQUISITION_ACTUAL_COSTS_KEY, []);
+  const idMap = readObject(LOCAL_REQUISITION_ID_MAP_KEY);
+  const resolveId = (id: any) => {
+    const s = String(id ?? '');
+    return idMap[s] ? String(idMap[s]) : s;
+  };
+
+  if (Array.isArray(statusOps) && statusOps.length > 0) {
+    const still: any[] = [];
+    for (const op of statusOps) {
+      try {
+        if (!op?.requisitionId || !op?.status) continue;
+        await updateRequisitionStatus(targetOrgId, resolveId(op.requisitionId), op.status);
+      } catch (e) {
+        console.error('Error sincronizando status requisición', e);
+        still.push(op);
+      }
+    }
+    writeJson(PENDING_REQUISITION_STATUS_KEY, still);
+  }
+
+  if (Array.isArray(costOps) && costOps.length > 0) {
+    const still: any[] = [];
+    for (const op of costOps) {
+      try {
+        if (!op?.requisitionId || !Array.isArray(op?.updates)) continue;
+        await setRequisitionItemsActualUnitCosts(targetOrgId, resolveId(op.requisitionId), op.updates);
+      } catch (e) {
+        console.error('Error sincronizando costos reales requisición', e);
+        still.push(op);
+      }
+    }
+    writeJson(PENDING_REQUISITION_ACTUAL_COSTS_KEY, still);
+  }
+};
+
 const syncOfflineRequisitions = async (targetOrgId: string) => {
   try {
     const raw = localStorage.getItem(PENDING_REQUISITIONS_KEY);
@@ -101,11 +389,11 @@ const syncOfflineRequisitions = async (targetOrgId: string) => {
 
     for (const entry of pending) {
       try {
-        const { projectId, supplierName, sourceBudgetLineId, items, sourceLineName } = entry || {};
+        const { localId, projectId, supplierName, sourceBudgetLineId, items, sourceLineName } = entry || {};
         if (!projectId || !Array.isArray(items) || items.length === 0) {
           continue;
         }
-        await createRequisition(
+        const remoteId = await createRequisition(
           targetOrgId,
           projectId,
           supplierName ?? null,
@@ -114,6 +402,93 @@ const syncOfflineRequisitions = async (targetOrgId: string) => {
           'sent',
           sourceLineName ?? null
         );
+
+        if (localId && remoteId) {
+          setRequisitionIdMapping(String(localId), String(remoteId));
+
+          // Update local requisitions history id so Compras continues to work.
+          try {
+            const existing = readJson<any[]>(LOCAL_REQUISITIONS_KEY, []);
+            if (Array.isArray(existing)) {
+              writeJson(
+                LOCAL_REQUISITIONS_KEY,
+                existing.map((r) => (String(r?.id) === String(localId) ? { ...r, id: String(remoteId) } : r))
+              );
+            }
+          } catch {
+            // ignore
+          }
+
+          // Cache remote items and migrate any locally-entered actual costs.
+          try {
+            const map = readObject(LOCAL_REQUISITION_ITEMS_KEY);
+            const localItems = Array.isArray(map[String(localId)]) ? (map[String(localId)] as any[]) : null;
+
+            const remoteRows = await listRequisitionItems(targetOrgId, String(remoteId));
+            const remoteItems = remoteRows.map((r) => ({
+              id: r.id,
+              name: r.name,
+              unit: r.unit,
+              quantity: r.quantity,
+              unitPrice: r.unitPrice,
+              actualUnitCost: r.actualUnitCost,
+            }));
+
+            map[String(remoteId)] = remoteItems;
+            delete map[String(localId)];
+            writeJson(LOCAL_REQUISITION_ITEMS_KEY, map);
+
+            if (localItems && localItems.length > 0) {
+              const updates: Array<{ id: string; actualUnitCost: number | null }> = [];
+              for (let i = 0; i < remoteItems.length; i++) {
+                const localCost = localItems[i]?.actualUnitCost;
+                if (localCost === null || localCost === undefined) continue;
+                updates.push({ id: String(remoteItems[i].id), actualUnitCost: Number(localCost) });
+              }
+              if (updates.length > 0) {
+                await setRequisitionItemsActualUnitCosts(targetOrgId, String(remoteId), updates);
+                const byId = new Map<string, number | null>();
+                updates.forEach((u) => byId.set(String(u.id), u.actualUnitCost));
+                map[String(remoteId)] = remoteItems.map((it) => ({
+                  ...it,
+                  actualUnitCost: byId.has(String(it.id)) ? byId.get(String(it.id))! : it.actualUnitCost,
+                }));
+                writeJson(LOCAL_REQUISITION_ITEMS_KEY, map);
+              }
+            }
+          } catch (e) {
+            console.error('Error migrando items/costos de requisición offline', e);
+          }
+
+          // Rewrite pending status/cost ops that still reference the localId
+          try {
+            const statusOps = readJson<any[]>(PENDING_REQUISITION_STATUS_KEY, []);
+            if (Array.isArray(statusOps)) {
+              writeJson(
+                PENDING_REQUISITION_STATUS_KEY,
+                statusOps.map((op) =>
+                  String(op?.requisitionId) === String(localId) ? { ...op, requisitionId: String(remoteId) } : op
+                )
+              );
+            }
+          } catch {
+            // ignore
+          }
+
+          try {
+            const costOps = readJson<any[]>(PENDING_REQUISITION_ACTUAL_COSTS_KEY, []);
+            if (Array.isArray(costOps)) {
+              writeJson(
+                PENDING_REQUISITION_ACTUAL_COSTS_KEY,
+                costOps.map((op) =>
+                  String(op?.requisitionId) === String(localId) ? { ...op, requisitionId: String(remoteId) } : op
+                )
+              );
+            }
+          } catch {
+            // ignore
+          }
+        }
       } catch (e) {
         console.error('Error sincronizando requisición pendiente', e);
         stillPending.push(entry);
@@ -149,6 +524,29 @@ const syncOfflineEmployees = async (targetOrgId: string) => {
   }
 };
 
+const syncOfflineProjects = async (targetOrgId: string) => {
+  const ops = readJson<any[]>(PENDING_PROJECTS_KEY, []);
+  if (!Array.isArray(ops) || ops.length === 0) return;
+
+  const still: any[] = [];
+  for (const op of ops) {
+    try {
+      const t = String(op?.type || '');
+      if (t === 'create' && op?.project) {
+        await dbCreateProject(targetOrgId, op.project);
+      } else if (t === 'update' && op?.projectId && op?.patch) {
+        await dbUpdateProject(targetOrgId, String(op.projectId), op.patch);
+      } else if (t === 'delete' && op?.projectId) {
+        await dbDeleteProject(targetOrgId, String(op.projectId));
+      }
+    } catch (e) {
+      console.error('Error sincronizando proyecto pendiente', e);
+      still.push(op);
+    }
+  }
+  writeJson(PENDING_PROJECTS_KEY, still);
+};
+
 const App: React.FC = () => {
   const [hash, setHash] = useState<string>(() => (typeof window !== 'undefined' ? window.location.hash || '' : ''));
 
@@ -179,71 +577,120 @@ const App: React.FC = () => {
   
   // Initialize from LocalStorage
   useEffect(() => {
-    if (!isSupabaseConfigured) {
-      const savedProjects = localStorage.getItem('projects');
-      if (savedProjects) {
-        setProjects(JSON.parse(savedProjects));
+    try {
+      const saved = localStorage.getItem(LOCAL_PROJECTS_KEY) ?? localStorage.getItem('projects');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setProjects(parsed);
+        }
       }
+    } catch {
+      // ignore
     }
   }, []);
 
   // Save to LocalStorage
   useEffect(() => {
-    if (!isSupabaseConfigured) {
+    try {
+      localStorage.setItem(LOCAL_PROJECTS_KEY, JSON.stringify(projects));
+      // Keep backward-compat for older builds that used 'projects'
       localStorage.setItem('projects', JSON.stringify(projects));
+    } catch {
+      // ignore
     }
   }, [projects]);
 
   const refreshProjects = async (targetOrgId: string) => {
-    const next = await listProjects(targetOrgId);
-    setProjects(next);
+    try {
+      const next = await listProjects(targetOrgId);
+      setProjects(next);
+      writeJson(LOCAL_PROJECTS_KEY, next);
+      return;
+    } catch (e) {
+      console.error(e);
+    }
+    const cached = readJson<Project[]>(LOCAL_PROJECTS_KEY, []);
+    if (Array.isArray(cached)) setProjects(cached);
   };
 
   const handleCreateProject = async (partial: Partial<Project>) => {
-    if (!isSupabaseConfigured || !orgId) {
-      const newProject: Project = {
-        id: crypto.randomUUID(),
-        name: partial.name || '',
-        clientName: partial.clientName || '',
-        location: partial.location || '',
-        lot: partial.lot,
-        block: partial.block,
-        coordinates: partial.coordinates,
-        areaLand: Number(partial.areaLand || 0),
-        areaBuild: Number(partial.areaBuild || 0),
-        needs: partial.needs || '',
-        status: (partial.status as any) || 'standby',
-        startDate: partial.startDate || new Date().toISOString(),
-        typology: partial.typology as any,
-        projectManager: partial.projectManager || '',
-      };
-      setProjects(prev => [newProject, ...prev]);
-      return newProject;
+    const localId = crypto.randomUUID();
+    const newProject: Project = {
+      id: localId,
+      name: partial.name || '',
+      clientName: partial.clientName || '',
+      location: partial.location || '',
+      lot: partial.lot,
+      block: partial.block,
+      coordinates: partial.coordinates,
+      areaLand: Number(partial.areaLand || 0),
+      areaBuild: Number(partial.areaBuild || 0),
+      needs: partial.needs || '',
+      status: (partial.status as any) || 'standby',
+      startDate: partial.startDate || new Date().toISOString(),
+      typology: partial.typology as any,
+      projectManager: partial.projectManager || '',
+    };
+
+    // Always save locally first
+    setProjects((prev) => [newProject, ...prev]);
+
+    if (isSupabaseConfigured && orgId) {
+      try {
+        const created = await dbCreateProject(orgId, { ...partial, id: localId });
+        // Same id, but reconcile server fields.
+        setProjects((prev) => prev.map((p) => (p.id === localId ? created : p)));
+        return created;
+      } catch (e) {
+        console.error(e);
+      }
     }
 
-    const created = await dbCreateProject(orgId, partial);
-    setProjects(prev => [created, ...prev]);
-    return created;
+    const pending = readJson<any[]>(PENDING_PROJECTS_KEY, []);
+    const next = Array.isArray(pending) ? pending : [];
+    next.push({ type: 'create', project: { ...partial, id: localId } });
+    writeJson(PENDING_PROJECTS_KEY, next);
+    return newProject;
   };
 
   const handleUpdateProject = async (projectId: string, patch: Partial<Project>) => {
-    if (!isSupabaseConfigured || !orgId) {
-      setProjects(prev => prev.map(p => (p.id === projectId ? ({ ...p, ...patch } as Project) : p)));
-      return;
+    // Always update local view first
+    setProjects((prev) => prev.map((p) => (p.id === projectId ? ({ ...p, ...patch } as Project) : p)));
+
+    if (isSupabaseConfigured && orgId) {
+      try {
+        const updated = await dbUpdateProject(orgId, projectId, patch);
+        setProjects((prev) => prev.map((p) => (p.id === projectId ? updated : p)));
+        return;
+      } catch (e) {
+        console.error(e);
+      }
     }
 
-    const updated = await dbUpdateProject(orgId, projectId, patch);
-    setProjects(prev => prev.map(p => (p.id === projectId ? updated : p)));
+    const pending = readJson<any[]>(PENDING_PROJECTS_KEY, []);
+    const next = Array.isArray(pending) ? pending : [];
+    next.push({ type: 'update', projectId, patch });
+    writeJson(PENDING_PROJECTS_KEY, next);
   };
 
   const handleDeleteProject = async (projectId: string) => {
-    if (!isSupabaseConfigured || !orgId) {
-      setProjects(prev => prev.filter(p => p.id !== projectId));
-      return;
+    // Always delete locally first
+    setProjects((prev) => prev.filter((p) => p.id !== projectId));
+
+    if (isSupabaseConfigured && orgId) {
+      try {
+        await dbDeleteProject(orgId, projectId);
+        return;
+      } catch (e) {
+        console.error(e);
+      }
     }
 
-    await dbDeleteProject(orgId, projectId);
-    setProjects(prev => prev.filter(p => p.id !== projectId));
+    const pending = readJson<any[]>(PENDING_PROJECTS_KEY, []);
+    const next = Array.isArray(pending) ? pending : [];
+    next.push({ type: 'delete', projectId });
+    writeJson(PENDING_PROJECTS_KEY, next);
   };
 
   const handleCreateTransaction = async (tx: any) => {
@@ -276,23 +723,70 @@ const App: React.FC = () => {
   };
 
   const handleLoadBudget = async (projectId: string) => {
-    if (!isSupabaseConfigured || !orgId) return null;
-    return await loadBudgetForProject(orgId, projectId);
+    if (!projectId) return null;
+    if (isSupabaseConfigured && orgId) {
+      try {
+        const remote = await loadBudgetForProject(orgId, projectId);
+        if (remote) {
+          writeJson(OFFLINE_BUDGET_KEY(projectId), remote);
+        }
+        return remote;
+      } catch (e: any) {
+        console.error(e);
+        // fallback local
+      }
+    }
+    return readJson<any | null>(OFFLINE_BUDGET_KEY(projectId), null);
   };
 
   const handleSaveBudget = async (projectId: string, typology: string, indirectPct: string, lines: any[]) => {
-    if (!isSupabaseConfigured || !orgId) return;
-    await saveBudgetForProject(orgId, projectId, typology, indirectPct, lines as any);
+    if (!projectId) return;
+    const localPayload = { typology, indirectPct, lines: Array.isArray(lines) ? lines : [] };
+    writeJson(OFFLINE_BUDGET_KEY(projectId), localPayload);
+    const pending = readJson<string[]>(PENDING_BUDGETS_KEY, []);
+    writeJson(PENDING_BUDGETS_KEY, uniq([...(Array.isArray(pending) ? pending : []), projectId]));
+
+    if (isSupabaseConfigured && orgId) {
+      try {
+        await saveBudgetForProject(orgId, projectId, typology, indirectPct, lines as any);
+        const nextPending = readJson<string[]>(PENDING_BUDGETS_KEY, []).filter((id) => id !== projectId);
+        writeJson(PENDING_BUDGETS_KEY, uniq(nextPending));
+      } catch (e: any) {
+        console.error(e);
+        // keep pending
+      }
+    }
   };
 
   const handleLoadProgress = async (projectId: string) => {
-    if (!isSupabaseConfigured || !orgId) return null;
-    return await loadProgressForProject(orgId, projectId);
+    if (!projectId) return null;
+    if (isSupabaseConfigured && orgId) {
+      try {
+        const remote = await loadProgressForProject(orgId, projectId);
+        if (remote) writeJson(OFFLINE_PROGRESS_KEY(projectId), remote);
+        return remote;
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    return readJson<any | null>(OFFLINE_PROGRESS_KEY(projectId), null);
   };
 
   const handleSaveProgress = async (projectId: string, payload: any) => {
-    if (!isSupabaseConfigured || !orgId) return;
-    await saveProgressForProject(orgId, projectId, payload);
+    if (!projectId) return;
+    writeJson(OFFLINE_PROGRESS_KEY(projectId), payload);
+    const pending = readJson<string[]>(PENDING_PROGRESS_KEY, []);
+    writeJson(PENDING_PROGRESS_KEY, uniq([...(Array.isArray(pending) ? pending : []), projectId]));
+
+    if (isSupabaseConfigured && orgId) {
+      try {
+        await saveProgressForProject(orgId, projectId, payload);
+        const nextPending = readJson<string[]>(PENDING_PROGRESS_KEY, []).filter((id) => id !== projectId);
+        writeJson(PENDING_PROGRESS_KEY, uniq(nextPending));
+      } catch (e) {
+        console.error(e);
+      }
+    }
   };
 
   const handleImportMaterialPrices = async (input: { url: string; vendor: string; currency: string }) => {
@@ -334,8 +828,9 @@ const App: React.FC = () => {
         const raw = localStorage.getItem(LOCAL_REQUISITIONS_KEY);
         const existing: any[] = raw ? JSON.parse(raw) : [];
         const total = (data.items ?? []).reduce((acc, it) => acc + (Number(it.quantity) || 0), 0);
+        const localReqId = crypto.randomUUID();
         const localReq = {
-          id: crypto.randomUUID(),
+          id: localReqId,
           projectId: data.projectId ?? null,
           requestedAt: nowIso,
           supplierName: supplierName ?? null,
@@ -347,11 +842,29 @@ const App: React.FC = () => {
         existing.unshift(localReq);
         localStorage.setItem(LOCAL_REQUISITIONS_KEY, JSON.stringify(existing));
 
+        // Cache items locally so invoice modal can work offline.
+        try {
+          const itemRows = (data.items ?? []).map((it, idx) => ({
+            id: `${localReqId}:${idx}`,
+            name: it.name,
+            unit: it.unit,
+            quantity: it.quantity,
+            unitPrice: null,
+            actualUnitCost: null,
+          }));
+          const map = readObject(LOCAL_REQUISITION_ITEMS_KEY);
+          map[String(localReqId)] = itemRows;
+          writeJson(LOCAL_REQUISITION_ITEMS_KEY, map);
+        } catch {
+          // ignore
+        }
+
         // Cola de sincronización
         try {
           const rawPending = localStorage.getItem(PENDING_REQUISITIONS_KEY);
           const pending: any[] = rawPending ? JSON.parse(rawPending) : [];
           pending.push({
+            localId: localReqId,
             projectId: data.projectId,
             supplierName,
             sourceBudgetLineId: data.sourceBudgetLineId ?? null,
@@ -367,7 +880,7 @@ const App: React.FC = () => {
       }
       return;
     }
-    await createRequisition(
+    const reqId = await createRequisition(
       orgId,
       data.projectId,
       supplierName,
@@ -375,6 +888,24 @@ const App: React.FC = () => {
       data.items,
       'sent'
     );
+
+    // Cache requisition items locally (supports offline invoice edits).
+    try {
+      const rows = await listRequisitionItems(orgId, reqId);
+      const mapped = rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        unit: r.unit,
+        quantity: r.quantity,
+        unitPrice: r.unitPrice,
+        actualUnitCost: r.actualUnitCost,
+      }));
+      const map = readObject(LOCAL_REQUISITION_ITEMS_KEY);
+      map[String(reqId)] = mapped;
+      writeJson(LOCAL_REQUISITION_ITEMS_KEY, map);
+    } catch {
+      // ignore
+    }
   };
 
   const handleListRequisitions = async () => {
@@ -396,44 +927,130 @@ const App: React.FC = () => {
     requisitionId: string,
     status: 'received' | 'draft' | 'sent' | 'confirmed' | 'cancelled'
   ) => {
-    if (!isSupabaseConfigured || !orgId) return;
-    await updateRequisitionStatus(orgId, requisitionId, status);
+    if (!requisitionId) return;
+    const resolvedId = mapRequisitionId(requisitionId);
+    // Always update local view if present
+    try {
+      const existing = readJson<any[]>(LOCAL_REQUISITIONS_KEY, []);
+      if (Array.isArray(existing) && existing.length > 0) {
+        writeJson(
+          LOCAL_REQUISITIONS_KEY,
+          existing.map((r) =>
+            String(r?.id) === String(requisitionId) || String(r?.id) === String(resolvedId) ? { ...r, status } : r
+          )
+        );
+      }
+    } catch {
+      // ignore
+    }
+
+    if (isSupabaseConfigured && orgId) {
+      try {
+        await updateRequisitionStatus(orgId, resolvedId, status);
+        return;
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    const pending = readJson<any[]>(PENDING_REQUISITION_STATUS_KEY, []);
+    const next = Array.isArray(pending) ? pending.filter((p) => p?.requisitionId !== resolvedId) : [];
+    next.push({ requisitionId: resolvedId, status });
+    writeJson(PENDING_REQUISITION_STATUS_KEY, next);
   };
 
   const handleListRequisitionItems = async (
     requisitionId: string
   ): Promise<Array<{ id: string; name: string; unit: string; quantity: number; unitPrice: number | null; actualUnitCost: number | null }> | null> => {
-    if (!isSupabaseConfigured || !orgId) return null;
-    const rows = await listRequisitionItems(orgId, requisitionId);
-    return rows.map((r) => ({
-      id: r.id,
-      name: r.name,
-      unit: r.unit,
-      quantity: r.quantity,
-      unitPrice: r.unitPrice,
-      actualUnitCost: r.actualUnitCost,
-    }));
+    const resolvedId = mapRequisitionId(requisitionId);
+
+    // Try cloud first; fall back to local cache.
+    if (isSupabaseConfigured && orgId) {
+      try {
+        const rows = await listRequisitionItems(orgId, resolvedId);
+        const mapped = rows.map((r) => ({
+          id: r.id,
+          name: r.name,
+          unit: r.unit,
+          quantity: r.quantity,
+          unitPrice: r.unitPrice,
+          actualUnitCost: r.actualUnitCost,
+        }));
+        const map = readObject(LOCAL_REQUISITION_ITEMS_KEY);
+        map[String(resolvedId)] = mapped;
+        writeJson(LOCAL_REQUISITION_ITEMS_KEY, map);
+        return mapped;
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    const map = readObject(LOCAL_REQUISITION_ITEMS_KEY);
+    const cached = map[String(resolvedId)] ?? map[String(requisitionId)];
+    return Array.isArray(cached) ? cached : [];
   };
 
   const handleSaveRequisitionActualCosts = async (
     requisitionId: string,
     updates: Array<{ id: string; actualUnitCost: number | null }>
   ) => {
-    if (!isSupabaseConfigured || !orgId) return;
-    await setRequisitionItemsActualUnitCosts(orgId, requisitionId, updates);
+    if (!requisitionId) return;
+    const resolvedId = mapRequisitionId(requisitionId);
+
+    // Always update local cached items so user sees changes offline.
+    try {
+      const map = readObject(LOCAL_REQUISITION_ITEMS_KEY);
+      const current = map[String(resolvedId)] ?? map[String(requisitionId)];
+      if (Array.isArray(current)) {
+        const byId = new Map<string, any>();
+        current.forEach((it: any) => {
+          if (it?.id) byId.set(String(it.id), it);
+        });
+        for (const u of updates) {
+          const it = byId.get(String(u.id));
+          if (it) it.actualUnitCost = u.actualUnitCost;
+        }
+        map[String(resolvedId)] = Array.from(byId.values());
+        writeJson(LOCAL_REQUISITION_ITEMS_KEY, map);
+      }
+    } catch {
+      // ignore
+    }
+
+    if (isSupabaseConfigured && orgId) {
+      try {
+        await setRequisitionItemsActualUnitCosts(orgId, resolvedId, updates);
+        return;
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    const pending = readJson<any[]>(PENDING_REQUISITION_ACTUAL_COSTS_KEY, []);
+    const next = Array.isArray(pending) ? pending.filter((p) => p?.requisitionId !== resolvedId) : [];
+    next.push({ requisitionId: resolvedId, updates });
+    writeJson(PENDING_REQUISITION_ACTUAL_COSTS_KEY, next);
   };
 
   const handleListSuppliers = async () => {
-    if (!isSupabaseConfigured || !orgId) return null;
-    const rows = await listSuppliers(orgId, 100);
-    return rows.map((r) => ({
-      id: r.id,
-      name: r.name,
-      whatsapp: r.whatsapp,
-      phone: r.phone,
-      defaultNoteTemplate: r.defaultNoteTemplate,
-      termsTemplate: r.termsTemplate,
-    }));
+    if (isSupabaseConfigured && orgId) {
+      try {
+        const rows = await listSuppliers(orgId, 100);
+        const mapped = rows.map((r) => ({
+          id: r.id,
+          name: r.name,
+          whatsapp: r.whatsapp,
+          phone: r.phone,
+          defaultNoteTemplate: r.defaultNoteTemplate,
+          termsTemplate: r.termsTemplate,
+        }));
+        writeJson(LOCAL_SUPPLIERS_KEY, mapped);
+        return mapped;
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    const rows = readJson<any[]>(LOCAL_SUPPLIERS_KEY, []);
+    return Array.isArray(rows) ? rows : [];
   };
 
   const handleUpsertSupplier = async (input: {
@@ -444,23 +1061,63 @@ const App: React.FC = () => {
     defaultNoteTemplate?: string | null;
     termsTemplate?: string | null;
   }): Promise<{ id: string } | null> => {
-    if (!isSupabaseConfigured || !orgId) return null;
-    const rec = await upsertSupplier(orgId, {
-      id: input.id ?? undefined,
+    const offlineId = input.id ?? crypto.randomUUID();
+    const localRow = {
+      id: offlineId,
       name: input.name,
       whatsapp: input.whatsapp ?? null,
       phone: input.phone ?? null,
       defaultNoteTemplate: input.defaultNoteTemplate ?? null,
       termsTemplate: input.termsTemplate ?? null,
-      email: null,
-      notes: null,
-    });
-    return { id: rec.id };
+    };
+    const existing = readJson<any[]>(LOCAL_SUPPLIERS_KEY, []);
+    writeJson(LOCAL_SUPPLIERS_KEY, upsertById(Array.isArray(existing) ? existing : [], localRow));
+
+    if (isSupabaseConfigured && orgId) {
+      try {
+        const rec = await upsertSupplier(orgId, {
+          id: offlineId,
+          name: input.name,
+          whatsapp: input.whatsapp ?? null,
+          phone: input.phone ?? null,
+          defaultNoteTemplate: input.defaultNoteTemplate ?? null,
+          termsTemplate: input.termsTemplate ?? null,
+          email: null,
+          notes: null,
+        });
+        return { id: rec.id };
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    const pending = readJson<any[]>(PENDING_SUPPLIERS_KEY, []);
+    const next = Array.isArray(pending) ? pending.filter((p) => !(p?.type === 'upsert' && p?.supplier?.id === offlineId)) : [];
+    next.push({ type: 'upsert', supplier: { ...localRow, email: null, notes: null } });
+    writeJson(PENDING_SUPPLIERS_KEY, next);
+    return { id: offlineId };
   };
 
   const handleDeleteSupplier = async (supplierId: string) => {
-    if (!isSupabaseConfigured || !orgId) return;
-    await deleteSupplier(orgId, supplierId);
+    if (!supplierId) return;
+    const existing = readJson<any[]>(LOCAL_SUPPLIERS_KEY, []);
+    if (Array.isArray(existing)) {
+      writeJson(LOCAL_SUPPLIERS_KEY, existing.filter((s) => String(s?.id) !== String(supplierId)));
+    }
+
+    if (isSupabaseConfigured && orgId) {
+      try {
+        await deleteSupplier(orgId, supplierId);
+        return;
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    const pending = readJson<any[]>(PENDING_SUPPLIERS_KEY, []);
+    const next = Array.isArray(pending) ? pending.filter((p) => !(p?.type === 'delete' && p?.id === supplierId)) : [];
+    next.push({ type: 'delete', id: supplierId });
+    writeJson(PENDING_SUPPLIERS_KEY, next);
   };
 
   const handleListEmployees = async () => {
@@ -523,66 +1180,197 @@ const App: React.FC = () => {
   };
 
   const handleLoadPayRates = async (): Promise<Record<string, number> | null> => {
-    if (!isSupabaseConfigured || !orgId) return null;
-    return await listOrgPayRates(orgId);
+    // Prefer cloud when available, but always fall back to local cache.
+    if (isSupabaseConfigured && orgId) {
+      try {
+        const rates = await listOrgPayRates(orgId);
+        writeJson(STORAGE_PAY_RATES, rates);
+        return rates;
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    return readJson<Record<string, number> | null>(STORAGE_PAY_RATES, null);
   };
 
   const handleSavePayRates = async (payRates: Record<string, number>) => {
-    if (!isSupabaseConfigured || !orgId) return;
-    await upsertOrgPayRates(orgId, payRates);
+    writeJson(STORAGE_PAY_RATES, payRates);
+    writeJson(PENDING_PAY_RATES_KEY, payRates);
+    if (isSupabaseConfigured && orgId) {
+      try {
+        await upsertOrgPayRates(orgId, payRates);
+        localStorage.removeItem(PENDING_PAY_RATES_KEY);
+      } catch (e) {
+        console.error(e);
+      }
+    }
   };
 
   const handleLoadEmployeeRateOverrides = async (): Promise<Record<string, number> | null> => {
-    if (!isSupabaseConfigured || !orgId) return null;
-    return await listEmployeeRateOverrides(orgId);
+    if (isSupabaseConfigured && orgId) {
+      try {
+        const overrides = await listEmployeeRateOverrides(orgId);
+        writeJson(STORAGE_EMPLOYEE_OVERRIDES, overrides);
+        return overrides;
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    return readJson<Record<string, number> | null>(STORAGE_EMPLOYEE_OVERRIDES, null);
   };
 
   const handleUpsertEmployeeRateOverride = async (employeeId: string, dailyRate: number) => {
-    if (!isSupabaseConfigured || !orgId) return;
-    await upsertEmployeeRateOverride(orgId, employeeId, dailyRate);
+    const overrides = readJson<Record<string, number>>(STORAGE_EMPLOYEE_OVERRIDES, {} as any);
+    writeJson(STORAGE_EMPLOYEE_OVERRIDES, { ...(overrides || {}), [employeeId]: dailyRate });
+
+    if (isSupabaseConfigured && orgId) {
+      try {
+        await upsertEmployeeRateOverride(orgId, employeeId, dailyRate);
+        return;
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    const pending = readJson<any[]>(PENDING_EMPLOYEE_OVERRIDES_KEY, []);
+    const next = Array.isArray(pending)
+      ? pending.filter((p) => !(p?.type === 'upsert' && p?.employeeId === employeeId))
+      : [];
+    next.push({ type: 'upsert', employeeId, dailyRate });
+    writeJson(PENDING_EMPLOYEE_OVERRIDES_KEY, next);
   };
 
   const handleDeleteEmployeeRateOverride = async (employeeId: string) => {
-    if (!isSupabaseConfigured || !orgId) return;
-    await deleteEmployeeRateOverride(orgId, employeeId);
+    const overrides = readJson<Record<string, number>>(STORAGE_EMPLOYEE_OVERRIDES, {} as any);
+    if (overrides && typeof overrides === 'object') {
+      const next = { ...(overrides as any) };
+      delete (next as any)[employeeId];
+      writeJson(STORAGE_EMPLOYEE_OVERRIDES, next);
+    }
+
+    if (isSupabaseConfigured && orgId) {
+      try {
+        await deleteEmployeeRateOverride(orgId, employeeId);
+        return;
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    const pending = readJson<any[]>(PENDING_EMPLOYEE_OVERRIDES_KEY, []);
+    const next = Array.isArray(pending)
+      ? pending.filter((p) => !(p?.type === 'delete' && p?.employeeId === employeeId))
+      : [];
+    next.push({ type: 'delete', employeeId });
+    writeJson(PENDING_EMPLOYEE_OVERRIDES_KEY, next);
   };
 
   const handleListContracts = async (): Promise<any[] | null> => {
-    if (!isSupabaseConfigured || !orgId) return null;
-    return await listEmployeeContracts(orgId, 50);
+    if (isSupabaseConfigured && orgId) {
+      try {
+        const rows = await listEmployeeContracts(orgId, 50);
+        writeJson(STORAGE_CONTRACTS, rows);
+        return rows;
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    const rows = readJson<any[]>(STORAGE_CONTRACTS, []);
+    return Array.isArray(rows) ? rows : [];
   };
 
   const handleUpsertContract = async (input: any): Promise<any> => {
-    if (!isSupabaseConfigured || !orgId) return input;
-    return await upsertEmployeeContract(orgId, input);
+    const withId = input && input.id ? input : { ...input, id: crypto.randomUUID() };
+    const existing = readJson<any[]>(STORAGE_CONTRACTS, []);
+    if (Array.isArray(existing)) {
+      writeJson(STORAGE_CONTRACTS, upsertById(existing, withId));
+    } else {
+      writeJson(STORAGE_CONTRACTS, [withId]);
+    }
+
+    const pending = readJson<any[]>(PENDING_CONTRACTS_KEY, []);
+    const nextPending = Array.isArray(pending) ? pending.filter((c) => c?.id !== withId.id) : [];
+    nextPending.push(withId);
+    writeJson(PENDING_CONTRACTS_KEY, nextPending);
+
+    if (isSupabaseConfigured && orgId) {
+      try {
+        const saved = await upsertEmployeeContract(orgId, withId);
+        // remove from pending if success
+        const after = readJson<any[]>(PENDING_CONTRACTS_KEY, []).filter((c) => c?.id !== withId.id);
+        writeJson(PENDING_CONTRACTS_KEY, after);
+        return saved;
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    return withId;
   };
 
   const handleListAttendance = async (workDate: string): Promise<any[] | null> => {
-    if (!isSupabaseConfigured || !orgId) return null;
-    return await listAttendanceForDate(orgId, workDate);
+    if (!workDate) return [];
+    // Start with local manual attendance for the date.
+    const localRowsAll = readJson<any[]>(LOCAL_ATTENDANCE_MANUAL_KEY, []);
+    const localRows = Array.isArray(localRowsAll)
+      ? localRowsAll.filter((r) => String(r?.work_date || r?.workDate || '') === String(workDate))
+      : [];
+
+    if (isSupabaseConfigured && orgId) {
+      try {
+        const remote = await listAttendanceForDate(orgId, workDate);
+        // Merge local rows on top so user still sees unsynced edits.
+        const merged = [...localRows, ...(Array.isArray(remote) ? remote : [])];
+        return merged;
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    return localRows;
   };
 
   const handleSetAttendanceToken = async (employeeId: string, token: string) => {
-    if (!isSupabaseConfigured || !orgId) return;
-    await setEmployeeAttendanceToken(employeeId, token);
+    if (!employeeId || !token) return;
+    if (isSupabaseConfigured && orgId) {
+      try {
+        await setEmployeeAttendanceToken(employeeId, token);
+        return;
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    const pending = readJson<any[]>(PENDING_ATTENDANCE_TOKENS_KEY, []);
+    const next = Array.isArray(pending) ? pending.filter((p) => p?.employeeId !== employeeId) : [];
+    next.push({ employeeId, token });
+    writeJson(PENDING_ATTENDANCE_TOKENS_KEY, next);
   };
 
   const handleListQuotes = async () => {
-    if (!isSupabaseConfigured || !orgId) return [];
-    const rows = await listServiceQuotes(orgId, { limit: 50 });
-    return rows.map((r) => ({
-      id: r.id,
-      client: r.client,
-      phone: r.phone,
-      address: r.address,
-      serviceName: r.serviceName,
-      quantity: r.quantity,
-      unit: r.unit,
-      unitPrice: r.unitPrice,
-      total: r.total,
-      createdAt: r.createdAt,
-      updatedAt: r.updatedAt,
-    }));
+    if (isSupabaseConfigured && orgId) {
+      try {
+        const rows = await listServiceQuotes(orgId, { limit: 50 });
+        const mapped = rows.map((r) => ({
+          id: r.id,
+          client: r.client,
+          phone: r.phone,
+          address: r.address,
+          serviceName: r.serviceName,
+          quantity: r.quantity,
+          unit: r.unit,
+          unitPrice: r.unitPrice,
+          total: r.total,
+          createdAt: r.createdAt,
+          updatedAt: r.updatedAt,
+        }));
+        writeJson(LOCAL_QUOTES_KEY, mapped);
+        return mapped;
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    const local = readJson<any[]>(LOCAL_QUOTES_KEY, []);
+    return Array.isArray(local) ? local : [];
   };
 
   const handleUpsertQuote = async (input: {
@@ -596,26 +1384,9 @@ const App: React.FC = () => {
     unitPrice?: number | null;
     total?: number | null;
   }) => {
-    if (!isSupabaseConfigured || !orgId) {
-      // En modo local, simplemente devolver un registro simulado para que el historial funcione en esta sesión.
-      const now = new Date().toISOString();
-      return {
-        id: input.id ?? crypto.randomUUID(),
-        client: input.client,
-        phone: input.phone ?? null,
-        address: input.address ?? null,
-        serviceName: input.serviceName,
-        quantity: input.quantity,
-        unit: input.unit ?? null,
-        unitPrice: input.unitPrice ?? null,
-        total: input.total ?? null,
-        createdAt: now,
-        updatedAt: now,
-      };
-    }
-
-    const rec = await upsertServiceQuote(orgId, {
-      id: input.id ?? null,
+    const now = new Date().toISOString();
+    const localRecord = {
+      id: input.id ?? crypto.randomUUID(),
       client: input.client,
       phone: input.phone ?? null,
       address: input.address ?? null,
@@ -624,26 +1395,77 @@ const App: React.FC = () => {
       unit: input.unit ?? null,
       unitPrice: input.unitPrice ?? null,
       total: input.total ?? null,
-    });
-
-    return {
-      id: rec.id,
-      client: rec.client,
-      phone: rec.phone,
-      address: rec.address,
-      serviceName: rec.serviceName,
-      quantity: rec.quantity,
-      unit: rec.unit,
-      unitPrice: rec.unitPrice,
-      total: rec.total,
-      createdAt: rec.createdAt,
-      updatedAt: rec.updatedAt,
+      createdAt: now,
+      updatedAt: now,
     };
+
+    const existing = readJson<any[]>(LOCAL_QUOTES_KEY, []);
+    writeJson(LOCAL_QUOTES_KEY, upsertById(Array.isArray(existing) ? existing : [], localRecord));
+
+    if (isSupabaseConfigured && orgId) {
+      try {
+        const rec = await upsertServiceQuote(orgId, {
+          id: localRecord.id,
+          client: input.client,
+          phone: input.phone ?? null,
+          address: input.address ?? null,
+          serviceName: input.serviceName,
+          quantity: input.quantity,
+          unit: input.unit ?? null,
+          unitPrice: input.unitPrice ?? null,
+          total: input.total ?? null,
+        });
+
+        // Remove any pending op for this id.
+        const pending = readJson<any[]>(PENDING_QUOTES_KEY, []);
+        writeJson(PENDING_QUOTES_KEY, (Array.isArray(pending) ? pending : []).filter((p) => !(p?.type === 'upsert' && p?.quote?.id === rec.id)));
+
+        return {
+          id: rec.id,
+          client: rec.client,
+          phone: rec.phone,
+          address: rec.address,
+          serviceName: rec.serviceName,
+          quantity: rec.quantity,
+          unit: rec.unit,
+          unitPrice: rec.unitPrice,
+          total: rec.total,
+          createdAt: rec.createdAt,
+          updatedAt: rec.updatedAt,
+        };
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    const pending = readJson<any[]>(PENDING_QUOTES_KEY, []);
+    const next = Array.isArray(pending) ? pending.filter((p) => !(p?.type === 'upsert' && p?.quote?.id === localRecord.id)) : [];
+    next.push({ type: 'upsert', quote: { ...localRecord } });
+    writeJson(PENDING_QUOTES_KEY, next);
+
+    return localRecord;
   };
 
   const handleDeleteQuote = async (quoteId: string) => {
-    if (!isSupabaseConfigured || !orgId) return;
-    await deleteServiceQuote(orgId, quoteId);
+    if (!quoteId) return;
+    const existing = readJson<any[]>(LOCAL_QUOTES_KEY, []);
+    if (Array.isArray(existing)) {
+      writeJson(LOCAL_QUOTES_KEY, existing.filter((q) => String(q?.id) !== String(quoteId)));
+    }
+
+    if (isSupabaseConfigured && orgId) {
+      try {
+        await deleteServiceQuote(orgId, quoteId);
+        return;
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    const pending = readJson<any[]>(PENDING_QUOTES_KEY, []);
+    const next = Array.isArray(pending) ? pending.filter((p) => !(p?.type === 'delete' && p?.id === quoteId)) : [];
+    next.push({ type: 'delete', id: quoteId });
+    writeJson(PENDING_QUOTES_KEY, next);
   };
 
   const handleLogin = async (email: string, password: string) => {
@@ -713,9 +1535,20 @@ const App: React.FC = () => {
         setOrgId(resolvedOrgId);
         await refreshProjects(resolvedOrgId);
         await Promise.all([
+          syncOfflineProjects(resolvedOrgId),
           syncOfflineTransactions(resolvedOrgId),
           syncOfflineRequisitions(resolvedOrgId),
           syncOfflineEmployees(resolvedOrgId),
+          syncOfflineBudgets(resolvedOrgId),
+          syncOfflineProgress(resolvedOrgId),
+          syncOfflineSuppliers(resolvedOrgId),
+          syncOfflinePayRates(resolvedOrgId),
+          syncOfflineEmployeeOverrides(resolvedOrgId),
+          syncOfflineContracts(resolvedOrgId),
+          syncOfflineQuotes(resolvedOrgId),
+          syncOfflineAttendanceTokens(),
+          syncOfflineAttendanceManual(resolvedOrgId),
+          syncOfflineRequisitionMutations(resolvedOrgId),
         ]);
         await syncOfflineTransactions(resolvedOrgId);
       } catch (e: any) {
@@ -725,6 +1558,30 @@ const App: React.FC = () => {
       }
     }
   };
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !orgId) return;
+    const onOnline = () => {
+      void Promise.all([
+        syncOfflineProjects(orgId),
+        syncOfflineTransactions(orgId),
+        syncOfflineRequisitions(orgId),
+        syncOfflineEmployees(orgId),
+        syncOfflineBudgets(orgId),
+        syncOfflineProgress(orgId),
+        syncOfflineSuppliers(orgId),
+        syncOfflinePayRates(orgId),
+        syncOfflineEmployeeOverrides(orgId),
+        syncOfflineContracts(orgId),
+        syncOfflineQuotes(orgId),
+        syncOfflineAttendanceTokens(),
+        syncOfflineAttendanceManual(orgId),
+        syncOfflineRequisitionMutations(orgId),
+      ]);
+    };
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+  }, [orgId]);
 
   const handleLogout = () => {
     setIsAuthenticated(false);
@@ -936,9 +1793,9 @@ const App: React.FC = () => {
                 projects={projects}
                 useCloud={isSupabaseConfigured && !!orgId}
                 orgId={orgId}
-                onLoadBudget={isSupabaseConfigured && orgId ? handleLoadBudget : undefined}
-                onLoadProgress={isSupabaseConfigured && orgId ? handleLoadProgress : undefined}
-                onSaveProgress={isSupabaseConfigured && orgId ? handleSaveProgress : undefined}
+                onLoadBudget={handleLoadBudget}
+                onLoadProgress={handleLoadProgress}
+                onSaveProgress={handleSaveProgress}
               />
             )}
             {currentView === 'COMPRAS' && (
@@ -947,13 +1804,13 @@ const App: React.FC = () => {
                 initialData={requisitionData}
                 onCreateRequisition={handleCreateRequisition}
                 onListRequisitions={handleListRequisitions}
-                onUpdateRequisitionStatus={isSupabaseConfigured && orgId ? handleUpdateRequisitionStatus : undefined}
-                onListRequisitionItems={isSupabaseConfigured && orgId ? handleListRequisitionItems : undefined}
-                onSaveRequisitionActualCosts={isSupabaseConfigured && orgId ? handleSaveRequisitionActualCosts : undefined}
+                onUpdateRequisitionStatus={handleUpdateRequisitionStatus}
+                onListRequisitionItems={handleListRequisitionItems}
+                onSaveRequisitionActualCosts={handleSaveRequisitionActualCosts}
                 canApproveRequisitions={isSupabaseConfigured && !!orgId}
-                onListSuppliers={isSupabaseConfigured && orgId ? handleListSuppliers : undefined}
-                onUpsertSupplier={isSupabaseConfigured && orgId ? handleUpsertSupplier : undefined}
-                onDeleteSupplier={isSupabaseConfigured && orgId ? handleDeleteSupplier : undefined}
+                onListSuppliers={handleListSuppliers}
+                onUpsertSupplier={handleUpsertSupplier}
+                onDeleteSupplier={handleDeleteSupplier}
               />
             )}
             {currentView === 'RRHH' && (
@@ -963,24 +1820,24 @@ const App: React.FC = () => {
                 isAdmin={isSupabaseConfigured && !!orgId}
                 onListEmployees={handleListEmployees}
                 onCreateEmployee={handleCreateEmployee}
-                onListContracts={isSupabaseConfigured && orgId ? handleListContracts : undefined}
-                onUpsertContract={isSupabaseConfigured && orgId ? handleUpsertContract : undefined}
-                onListAttendance={isSupabaseConfigured && orgId ? handleListAttendance : undefined}
-                onSetAttendanceToken={isSupabaseConfigured && orgId ? handleSetAttendanceToken : undefined}
-                onLoadPayRates={isSupabaseConfigured && orgId ? handleLoadPayRates : undefined}
-                onSavePayRates={isSupabaseConfigured && orgId ? handleSavePayRates : undefined}
-                onLoadEmployeeRateOverrides={isSupabaseConfigured && orgId ? handleLoadEmployeeRateOverrides : undefined}
-                onUpsertEmployeeRateOverride={isSupabaseConfigured && orgId ? handleUpsertEmployeeRateOverride : undefined}
-                onDeleteEmployeeRateOverride={isSupabaseConfigured && orgId ? handleDeleteEmployeeRateOverride : undefined}
+                onListContracts={handleListContracts}
+                onUpsertContract={handleUpsertContract}
+                onListAttendance={handleListAttendance}
+                onSetAttendanceToken={handleSetAttendanceToken}
+                onLoadPayRates={handleLoadPayRates}
+                onSavePayRates={handleSavePayRates}
+                onLoadEmployeeRateOverrides={handleLoadEmployeeRateOverrides}
+                onUpsertEmployeeRateOverride={handleUpsertEmployeeRateOverride}
+                onDeleteEmployeeRateOverride={handleDeleteEmployeeRateOverride}
               />
             )}
             {currentView === 'COTIZADOR' && (
               <Cotizador 
                 initialData={quoteInitialData} 
                 syncVersion={0}
-                onListQuotes={isSupabaseConfigured && orgId ? handleListQuotes : undefined}
-                onUpsertQuote={isSupabaseConfigured && orgId ? handleUpsertQuote : undefined}
-                onDeleteQuote={isSupabaseConfigured && orgId ? handleDeleteQuote : undefined}
+                onListQuotes={handleListQuotes}
+                onUpsertQuote={handleUpsertQuote}
+                onDeleteQuote={handleDeleteQuote}
               />
             )}
           </div>

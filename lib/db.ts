@@ -263,7 +263,11 @@ export async function listProjects(orgId: string): Promise<Project[]> {
 
 export async function createProject(orgId: string, project: Partial<Project>): Promise<Project> {
   const supabase = getSupabaseClient();
-  const payload = toDbProject(project, orgId);
+  const base = toDbProject(project, orgId) as any;
+  const payload: any = {
+    ...(project?.id ? { id: String(project.id) } : {}),
+    ...base,
+  };
 
   const res = await supabase
     .from('projects')
@@ -1245,7 +1249,7 @@ export async function createRequisition(
   items: Array<{ name: string; unit: string; quantity: number }>,
   status: 'draft' | 'sent' = 'sent',
   sourceLineName?: string | null
-): Promise<void> {
+): Promise<string> {
   const supabase = getSupabaseClient();
 
   requireNonEmpty(orgId, 'orgId');
@@ -1326,6 +1330,8 @@ export async function createRequisition(
   if (status === 'sent') {
     await updateRequisitionStatus(orgId, reqId, 'sent');
   }
+
+  return reqId;
 }
 
 export async function listRequisitions(

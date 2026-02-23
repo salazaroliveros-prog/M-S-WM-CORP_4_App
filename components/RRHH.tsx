@@ -398,6 +398,27 @@ const RRHH: React.FC<Props> = ({
   const STORAGE_EMPLOYEE_OVERRIDES = 'wm_employee_overrides_v1';
   const STORAGE_CONTRACTS = 'wm_contract_records_v1';
 
+  const STORAGE_ATTENDANCE_MANUAL = 'wm_offline_attendance_manual_v1';
+  const STORAGE_PENDING_ATTENDANCE_MANUAL = 'wm_pending_attendance_manual_v1';
+
+  const readJson = <T,>(key: string, fallback: T): T => {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return fallback;
+      return JSON.parse(raw) as T;
+    } catch {
+      return fallback;
+    }
+  };
+
+  const writeJson = (key: string, value: any) => {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch {
+      // ignore
+    }
+  };
+
   const loadLocalEmployees = () => {
     try {
       const raw = localStorage.getItem(STORAGE_EMPLOYEES);
@@ -601,17 +622,37 @@ const RRHH: React.FC<Props> = ({
 
     setLoadingPayrollAttendance(true);
     try {
-      const supabase = getSupabaseClient();
-      const { data, error } = await supabase
-        .from('attendance')
-        .select('*')
-        .gte('work_date', payrollStart)
-        .lte('work_date', payrollEnd);
+      const localAll = readJson<any[]>(STORAGE_ATTENDANCE_MANUAL, []);
+      const local = Array.isArray(localAll)
+        ? localAll.filter((r) => {
+            const d = String(r?.work_date || r?.date || '').slice(0, 10);
+            if (!d) return false;
+            return String(d) >= String(payrollStart) && String(d) <= String(payrollEnd);
+          })
+        : [];
 
-      if (error) throw error;
-      setPayrollAttendanceRows(Array.isArray(data) ? data : []);
-    } catch {
-      setPayrollAttendanceRows([]);
+      // Try cloud; if it fails (offline), keep local rows.
+      try {
+        const supabase = getSupabaseClient();
+        const { data, error } = await supabase
+          .from('attendance')
+          .select('*')
+          .gte('work_date', payrollStart)
+          .lte('work_date', payrollEnd);
+
+        if (error) throw error;
+        const remote = Array.isArray(data) ? data : [];
+        const byId = new Map<string, any>();
+        remote.forEach((r: any) => {
+          if (r?.id) byId.set(String(r.id), r);
+        });
+        local.forEach((r: any) => {
+          if (r?.id) byId.set(String(r.id), r);
+        });
+        setPayrollAttendanceRows(Array.from(byId.values()));
+      } catch {
+        setPayrollAttendanceRows(local);
+      }
     } finally {
       setLoadingPayrollAttendance(false);
     }
@@ -844,20 +885,61 @@ const RRHH: React.FC<Props> = ({
 
   const handleSaveAttendance = async () => {
     if (!newAttendance.employee_id || !newAttendance.work_date) return;
-    await getSupabaseClient().from('attendance').insert([{ ...newAttendance }]);
+
+    const row = { ...newAttendance, id: crypto.randomUUID() };
+    const existing = readJson<any[]>(STORAGE_ATTENDANCE_MANUAL, []);
+    writeJson(STORAGE_ATTENDANCE_MANUAL, [row, ...(Array.isArray(existing) ? existing : [])]);
+
+    const pending = readJson<any[]>(STORAGE_PENDING_ATTENDANCE_MANUAL, []);
+    writeJson(STORAGE_PENDING_ATTENDANCE_MANUAL, [...(Array.isArray(pending) ? pending : []), { type: 'upsert', row }]);
+
+    try {
+      await getSupabaseClient().from('attendance').upsert([{ ...row }]);
+    } catch {
+      // offline or RLS; queued for later
+    }
+
     setNewAttendance({ employee_id: '', work_date: '', check_in: '', check_out: '', location_lat: '', location_lng: '' });
     refreshAttendance();
   };
 
   const handleUpdateAttendance = async () => {
     if (!editingAttendance || !editingAttendance.id) return;
-    await getSupabaseClient().from('attendance').update(editingAttendance).eq('id', editingAttendance.id);
+
+    const existing = readJson<any[]>(STORAGE_ATTENDANCE_MANUAL, []);
+    const next = Array.isArray(existing)
+      ? existing.map((r) => (String(r?.id) === String(editingAttendance.id) ? { ...r, ...editingAttendance } : r))
+      : [editingAttendance];
+    writeJson(STORAGE_ATTENDANCE_MANUAL, next);
+
+    const pending = readJson<any[]>(STORAGE_PENDING_ATTENDANCE_MANUAL, []);
+    writeJson(STORAGE_PENDING_ATTENDANCE_MANUAL, [...(Array.isArray(pending) ? pending : []), { type: 'upsert', row: editingAttendance }]);
+
+    try {
+      await getSupabaseClient().from('attendance').update(editingAttendance).eq('id', editingAttendance.id);
+    } catch {
+      // offline; queued for later
+    }
+
     setEditingAttendance(null);
     refreshAttendance();
   };
 
   const handleDeleteAttendance = async (id: string) => {
-    await getSupabaseClient().from('attendance').delete().eq('id', id);
+    const existing = readJson<any[]>(STORAGE_ATTENDANCE_MANUAL, []);
+    writeJson(
+      STORAGE_ATTENDANCE_MANUAL,
+      Array.isArray(existing) ? existing.filter((r) => String(r?.id) !== String(id)) : []
+    );
+
+    const pending = readJson<any[]>(STORAGE_PENDING_ATTENDANCE_MANUAL, []);
+    writeJson(STORAGE_PENDING_ATTENDANCE_MANUAL, [...(Array.isArray(pending) ? pending : []), { type: 'delete', id }]);
+
+    try {
+      await getSupabaseClient().from('attendance').delete().eq('id', id);
+    } catch {
+      // offline; queued for later
+    }
     refreshAttendance();
   };
 

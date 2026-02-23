@@ -19,6 +19,26 @@ type GeoState = {
   error?: string;
 };
 
+const PENDING_WORKER_ATTENDANCE_KEY = 'wm_pending_worker_attendance_v1';
+
+function readJson<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJson(key: string, value: any) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // ignore
+  }
+}
+
 const WorkerAttendance: React.FC = () => {
   const parseTokenFromHash = () => {
     const raw = window.location.hash || '';
@@ -68,6 +88,31 @@ const WorkerAttendance: React.FC = () => {
   const [webauthnBusy, setWebauthnBusy] = useState(false);
   const [sending, setSending] = useState(false);
   const [lastResult, setLastResult] = useState<any | null>(null);
+
+  const drainPending = async () => {
+    const pending = readJson<any[]>(PENDING_WORKER_ATTENDANCE_KEY, []);
+    if (!Array.isArray(pending) || pending.length === 0) return;
+
+    const still: any[] = [];
+    for (const op of pending) {
+      try {
+        if (!op?.payload) continue;
+        await submitAttendanceWithToken(op.payload);
+      } catch {
+        still.push(op);
+      }
+    }
+    writeJson(PENDING_WORKER_ATTENDANCE_KEY, still);
+  };
+
+  useEffect(() => {
+    const onOnline = () => {
+      void drainPending();
+    };
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const canUseGeolocation = typeof navigator !== 'undefined' && !!navigator.geolocation;
 
@@ -218,6 +263,7 @@ const WorkerAttendance: React.FC = () => {
     }
 
     setSending(true);
+    let payload: any | null = null;
     try {
       let biometricPayload: any = null;
       if (biometricMode === 'code') {
@@ -238,7 +284,7 @@ const WorkerAttendance: React.FC = () => {
         };
       }
 
-      const res = await submitAttendanceWithToken({
+      payload = {
         token,
         action,
         workDate,
@@ -247,12 +293,24 @@ const WorkerAttendance: React.FC = () => {
         accuracyM: geo.accuracyM ?? null,
         biometric: biometricPayload,
         device: deviceInfo,
-      });
+      };
+
+      const res = await submitAttendanceWithToken(payload);
 
       setLastResult(res);
       alert(action === 'check_in' ? 'Entrada registrada.' : 'Salida registrada.');
     } catch (e: any) {
-      alert(e?.message || 'No se pudo registrar asistencia');
+      // Offline-first fallback: keep the attempt locally and retry when online.
+      try {
+        if (!payload) throw e;
+        const pending = readJson<any[]>(PENDING_WORKER_ATTENDANCE_KEY, []);
+        const next = Array.isArray(pending) ? pending : [];
+        next.push({ id: crypto.randomUUID(), queuedAt: new Date().toISOString(), payload });
+        writeJson(PENDING_WORKER_ATTENDANCE_KEY, next);
+        alert('Sin internet: guardado en el teléfono. Se enviará automáticamente al reconectarse.');
+      } catch {
+        alert(e?.message || 'No se pudo registrar asistencia');
+      }
     } finally {
       setSending(false);
     }
