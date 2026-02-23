@@ -1,43 +1,12 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabaseClient';
-  // --- Realtime integration ---
-  const channelRef = useRef<any>(null);
-  // Get orgId from the selected project (if any)
-  const orgId = (() => {
-    const project = projects.find((p) => p.id === selectedProjectId);
-    return project ? (project as any).orgId || (project as any).org_id : null;
-  })();
-
-  useEffect(() => {
-    if (!isSupabaseConfigured || !orgId || !onListRequisitions) {
-      return;
-    }
-    const supabase = getSupabaseClient();
-    const channel = supabase
-      .channel(`requisitions:${orgId}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'requisitions', filter: `org_id=eq.${orgId}` },
-        async () => {
-          try {
-            const res = await onListRequisitions();
-            setHistory(res);
-          } catch {
-            // ignore
-          }
-        }
-      )
-      .subscribe();
-    channelRef.current = channel;
-    return () => {
-      if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
-        channelRef.current = null;
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orgId, isSupabaseConfigured, onListRequisitions]);
 import { BudgetLine, Project, RequisitionData, RequisitionItem } from '../types';
+
+/*
+  NOTE (preserved): There was a "Realtime integration" hooks block here at module scope.
+  That breaks Rules of Hooks and caused a runtime error (Invalid hook call).
+  The block was moved inside the `Compras` component below to keep behavior.
+*/
 import { ShoppingCart, Send, Plus, Trash2, ClipboardList, X } from 'lucide-react';
 
 interface Props {
@@ -213,6 +182,15 @@ const Compras: React.FC<Props> = ({
     () => projects.find(p => p.id === selectedProjectId) || null,
     [projects, selectedProjectId]
   );
+
+  // --- Realtime integration ---
+  const channelRef = useRef<any>(null);
+
+  // Get orgId from the selected project (if any)
+  const orgId = useMemo(() => {
+    const project = projects.find((p) => p.id === selectedProjectId);
+    return project ? ((project as any).orgId || (project as any).org_id) : null;
+  }, [projects, selectedProjectId]);
 
   const SUPPLIERS_STORAGE_KEY = 'wm_suppliers_v1';
   const defaultSuppliers: Supplier[] = useMemo(
@@ -432,6 +410,36 @@ const Compras: React.FC<Props> = ({
   }, [selectedProjectId, onLoadBudget]);
 
   const [history, setHistory] = useState<Array<{ id: string; projectId: string | null; requestedAt: string; supplierName?: string | null; supplierNote?: string | null; total: number; actualTotal?: number; status: string }>>([]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !orgId || !onListRequisitions) {
+      return;
+    }
+    const supabase = getSupabaseClient();
+    const channel = supabase
+      .channel(`requisitions:${orgId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'requisitions', filter: `org_id=eq.${orgId}` },
+        async () => {
+          try {
+            const res = await onListRequisitions();
+            setHistory(res);
+          } catch {
+            // ignore
+          }
+        }
+      )
+      .subscribe();
+
+    channelRef.current = channel;
+    return () => {
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+    };
+  }, [orgId, onListRequisitions]);
 
   const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
   const [invoiceReqId, setInvoiceReqId] = useState<string | null>(null);
