@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { FileText, Copy, Send } from 'lucide-react';
 import { isSupabaseConfigured } from '../lib/supabaseClient';
 import { submitEmployeeContractResponsePublic } from '../lib/db';
@@ -25,6 +25,27 @@ type IntakeResponse = IntakeSeed & {
   accepted: boolean;
   responseAt: string;
 };
+
+const PENDING_CONTRACT_INTAKE_KEY = 'wm_pending_contract_intake_v1';
+const DRAFT_CONTRACT_INTAKE_KEY = (requestId: string) => `wm_contract_intake_draft_v1_${requestId}`;
+
+function readJson<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJson(key: string, value: any) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // ignore
+  }
+}
 
 const isLikelyUuid = (s: string) => {
   const v = String(s || '').trim();
@@ -72,8 +93,75 @@ const ContractIntake: React.FC = () => {
   const [startDate, setStartDate] = useState('');
   const [emergencyContact, setEmergencyContact] = useState('');
   const [accepted, setAccepted] = useState(false);
-  const [cloudSubmitStatus, setCloudSubmitStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [cloudSubmitStatus, setCloudSubmitStatus] = useState<'idle' | 'sending' | 'sent' | 'queued' | 'error'>('idle');
   const [cloudSubmitError, setCloudSubmitError] = useState<string>('');
+
+  // Load any local draft for this requestId.
+  useEffect(() => {
+    if (!seed?.requestId) return;
+    const draft = readJson<any | null>(DRAFT_CONTRACT_INTAKE_KEY(seed.requestId), null);
+    if (!draft || typeof draft !== 'object') return;
+    if (typeof draft.dpi === 'string') setDpi(draft.dpi);
+    if (typeof draft.phone === 'string') setPhone(draft.phone);
+    if (typeof draft.address === 'string') setAddress(draft.address);
+    if (typeof draft.startDate === 'string') setStartDate(draft.startDate);
+    if (typeof draft.emergencyContact === 'string') setEmergencyContact(draft.emergencyContact);
+    if (typeof draft.accepted === 'boolean') setAccepted(draft.accepted);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seed?.requestId]);
+
+  // Persist draft locally so the worker doesn't lose progress offline.
+  useEffect(() => {
+    if (!seed?.requestId) return;
+    writeJson(DRAFT_CONTRACT_INTAKE_KEY(seed.requestId), {
+      dpi,
+      phone,
+      address,
+      startDate,
+      emergencyContact,
+      accepted,
+      updatedAt: new Date().toISOString(),
+    });
+  }, [seed?.requestId, dpi, phone, address, startDate, emergencyContact, accepted]);
+
+  const enqueuePending = (payload: IntakeResponse) => {
+    const pending = readJson<any[]>(PENDING_CONTRACT_INTAKE_KEY, []);
+    const next = Array.isArray(pending) ? pending.filter((p) => String(p?.requestId) !== String(payload.requestId)) : [];
+    next.push({ id: crypto.randomUUID(), queuedAt: new Date().toISOString(), requestId: payload.requestId, response: payload });
+    writeJson(PENDING_CONTRACT_INTAKE_KEY, next);
+  };
+
+  const drainPending = async () => {
+    if (!isSupabaseConfigured) return;
+    const pending = readJson<any[]>(PENDING_CONTRACT_INTAKE_KEY, []);
+    if (!Array.isArray(pending) || pending.length === 0) return;
+
+    const still: any[] = [];
+    for (const op of pending) {
+      try {
+        if (!op?.requestId || !op?.response) continue;
+        await submitEmployeeContractResponsePublic({ requestId: String(op.requestId), response: op.response });
+        try {
+          localStorage.removeItem(DRAFT_CONTRACT_INTAKE_KEY(String(op.requestId)));
+        } catch {
+          // ignore
+        }
+      } catch {
+        still.push(op);
+      }
+    }
+    writeJson(PENDING_CONTRACT_INTAKE_KEY, still);
+  };
+
+  useEffect(() => {
+    const onOnline = () => {
+      void drainPending();
+    };
+    window.addEventListener('online', onOnline);
+    void drainPending();
+    return () => window.removeEventListener('online', onOnline);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const responseCode = useMemo(() => {
     if (!seed) return '';
@@ -120,10 +208,42 @@ const ContractIntake: React.FC = () => {
       };
       await submitEmployeeContractResponsePublic({ requestId: seed.requestId, response: payload });
       setCloudSubmitStatus('sent');
+      try {
+        localStorage.removeItem(DRAFT_CONTRACT_INTAKE_KEY(seed.requestId));
+      } catch {
+        // ignore
+      }
+      // remove any pending op for this request id
+      try {
+        const pending = readJson<any[]>(PENDING_CONTRACT_INTAKE_KEY, []);
+        writeJson(
+          PENDING_CONTRACT_INTAKE_KEY,
+          (Array.isArray(pending) ? pending : []).filter((p) => String(p?.requestId) !== String(seed.requestId))
+        );
+      } catch {
+        // ignore
+      }
       return true;
     } catch (e: any) {
-      setCloudSubmitStatus('error');
-      setCloudSubmitError(String(e?.message || 'No se pudo enviar automáticamente a RRHH.'));
+      // Offline-first: queue the response locally and retry when online.
+      try {
+        const payload: IntakeResponse = {
+          ...seed,
+          dpi: dpi.trim(),
+          phone: phone.trim(),
+          address: address.trim(),
+          startDate: startDate.trim(),
+          emergencyContact: emergencyContact.trim(),
+          accepted,
+          responseAt: new Date().toISOString(),
+        };
+        enqueuePending(payload);
+        setCloudSubmitStatus('queued');
+        setCloudSubmitError('Sin internet: guardado en el teléfono. Se enviará automáticamente al reconectarse.');
+      } catch {
+        setCloudSubmitStatus('error');
+        setCloudSubmitError(String(e?.message || 'No se pudo enviar automáticamente a RRHH.'));
+      }
       return false;
     }
   };
@@ -242,9 +362,17 @@ const ContractIntake: React.FC = () => {
             <div className="text-xs border rounded p-2 mb-3 bg-gray-50">
               <div className="font-semibold text-gray-700">Envío automático a RRHH</div>
               <div className="text-gray-600">
-                Estado: {cloudSubmitStatus === 'idle' ? 'pendiente' : cloudSubmitStatus === 'sending' ? 'enviando…' : cloudSubmitStatus === 'sent' ? 'enviado' : 'error'}
+                Estado: {cloudSubmitStatus === 'idle'
+                  ? 'pendiente'
+                  : cloudSubmitStatus === 'sending'
+                    ? 'enviando…'
+                    : cloudSubmitStatus === 'sent'
+                      ? 'enviado'
+                      : cloudSubmitStatus === 'queued'
+                        ? 'guardado (pendiente)'
+                        : 'error'}
               </div>
-              {cloudSubmitStatus === 'error' && cloudSubmitError && (
+              {(cloudSubmitStatus === 'error' || cloudSubmitStatus === 'queued') && cloudSubmitError && (
                 <div className="text-amber-700 mt-1">{cloudSubmitError}</div>
               )}
               {cloudSubmitStatus === 'sent' && (

@@ -1129,8 +1129,9 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
       <div className="bg-white p-4 rounded-xl shadow-md border border-gray-100">
         <h3 className="font-bold text-lg mb-2 text-navy-900">Stock de Materiales por Proyecto</h3>
         <div className="mb-2">
-          <label className="block text-sm font-medium text-gray-700 mb-1">Seleccionar Proyecto</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="seguimiento-project-select">Seleccionar Proyecto</label>
           <select
+            id="seguimiento-project-select"
             className="w-full max-w-xs p-2 border rounded"
             value={selectedProjectId}
             onChange={e => { setSelectedProjectId(e.target.value); setShowStockTable(true); }}
