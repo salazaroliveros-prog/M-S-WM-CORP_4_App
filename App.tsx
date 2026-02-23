@@ -1896,6 +1896,7 @@ const App: React.FC = () => {
                 projects={projects} 
                 initialData={requisitionData}
                 syncVersion={syncVersion}
+                onLoadBudget={handleLoadBudget}
                 onCreateRequisition={handleCreateRequisition}
                 onListRequisitions={handleListRequisitions}
                 onUpdateRequisitionStatus={handleUpdateRequisitionStatus}
