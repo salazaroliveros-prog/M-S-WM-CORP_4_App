@@ -1028,7 +1028,7 @@ const RRHH: React.FC<Props> = ({
           dailyRate: safeNumber(seedSource?.dailyRate ?? parsed.dailyRate, 0),
           projectName: seedSource?.projectName ?? resolvedProjectName,
         },
-        response: { ...parsed, signatureUrl, selfieUrl, experienceYears, references },
+        response: { ...parsed, signatureUrl: signatureUrl ?? undefined, selfieUrl: selfieUrl ?? undefined, experienceYears, references },
       };
 
       setContracts(prev => {
@@ -1947,15 +1947,15 @@ const RRHH: React.FC<Props> = ({
             <div className="bg-white rounded shadow p-4">
               <h2 className="font-bold mb-2">Asistencias manuales</h2>
               <div className="flex gap-2 mb-2 flex-wrap">
-                <select value={newAttendance.employee_id} onChange={e => setNewAttendance(a => ({ ...a, employee_id: e.target.value }))} className="input input-bordered" aria-label="Empleado" title="Empleado">
+                <select value={newAttendance.employee_id} onChange={e => setNewAttendance((a: any) => ({ ...a, employee_id: e.target.value }))} className="input input-bordered" aria-label="Empleado" title="Empleado">
                   <option value="">Empleado</option>
                   {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
                 </select>
-                <input type="date" value={newAttendance.work_date} onChange={e => setNewAttendance(a => ({ ...a, work_date: e.target.value }))} className="input input-bordered" title="Fecha" aria-label="Fecha" />
-                <input type="time" value={newAttendance.check_in} onChange={e => setNewAttendance(a => ({ ...a, check_in: e.target.value }))} className="input input-bordered" placeholder="Check-in" />
-                <input type="time" value={newAttendance.check_out} onChange={e => setNewAttendance(a => ({ ...a, check_out: e.target.value }))} className="input input-bordered" placeholder="Check-out" />
-                <input type="number" step="any" value={newAttendance.location_lat} onChange={e => setNewAttendance(a => ({ ...a, location_lat: e.target.value }))} className="input input-bordered w-24" placeholder="Lat" />
-                <input type="number" step="any" value={newAttendance.location_lng} onChange={e => setNewAttendance(a => ({ ...a, location_lng: e.target.value }))} className="input input-bordered w-24" placeholder="Lng" />
+                <input type="date" value={newAttendance.work_date} onChange={e => setNewAttendance((a: any) => ({ ...a, work_date: e.target.value }))} className="input input-bordered" title="Fecha" aria-label="Fecha" />
+                <input type="time" value={newAttendance.check_in} onChange={e => setNewAttendance((a: any) => ({ ...a, check_in: e.target.value }))} className="input input-bordered" placeholder="Check-in" />
+                <input type="time" value={newAttendance.check_out} onChange={e => setNewAttendance((a: any) => ({ ...a, check_out: e.target.value }))} className="input input-bordered" placeholder="Check-out" />
+                <input type="number" step="any" value={newAttendance.location_lat} onChange={e => setNewAttendance((a: any) => ({ ...a, location_lat: e.target.value }))} className="input input-bordered w-24" placeholder="Lat" />
+                <input type="number" step="any" value={newAttendance.location_lng} onChange={e => setNewAttendance((a: any) => ({ ...a, location_lng: e.target.value }))} className="input input-bordered w-24" placeholder="Lng" />
                 <button type="button" className="btn-primary" onClick={handleSaveAttendance}>Agregar</button>
               </div>
               <div className="overflow-x-auto">
@@ -1981,10 +1981,10 @@ const RRHH: React.FC<Props> = ({
               </div>
               {editingAttendance && (
                 <div className="flex gap-2 mt-2 flex-wrap">
-                  <input type="time" value={editingAttendance.check_in || ''} onChange={e => setEditingAttendance(a => ({ ...a, check_in: e.target.value }))} className="input input-bordered" placeholder="Check-in" />
-                  <input type="time" value={editingAttendance.check_out || ''} onChange={e => setEditingAttendance(a => ({ ...a, check_out: e.target.value }))} className="input input-bordered" placeholder="Check-out" />
-                  <input type="number" step="any" value={editingAttendance.location_lat || ''} onChange={e => setEditingAttendance(a => ({ ...a, location_lat: e.target.value }))} className="input input-bordered w-24" placeholder="Lat" />
-                  <input type="number" step="any" value={editingAttendance.location_lng || ''} onChange={e => setEditingAttendance(a => ({ ...a, location_lng: e.target.value }))} className="input input-bordered w-24" placeholder="Lng" />
+                  <input type="time" value={editingAttendance.check_in || ''} onChange={e => setEditingAttendance((a: any) => ({ ...a, check_in: e.target.value }))} className="input input-bordered" placeholder="Check-in" />
+                  <input type="time" value={editingAttendance.check_out || ''} onChange={e => setEditingAttendance((a: any) => ({ ...a, check_out: e.target.value }))} className="input input-bordered" placeholder="Check-out" />
+                  <input type="number" step="any" value={editingAttendance.location_lat || ''} onChange={e => setEditingAttendance((a: any) => ({ ...a, location_lat: e.target.value }))} className="input input-bordered w-24" placeholder="Lat" />
+                  <input type="number" step="any" value={editingAttendance.location_lng || ''} onChange={e => setEditingAttendance((a: any) => ({ ...a, location_lng: e.target.value }))} className="input input-bordered w-24" placeholder="Lng" />
                   <button type="button" className="btn-primary" onClick={handleUpdateAttendance}>Guardar</button>
                   <button type="button" className="btn-secondary" onClick={() => setEditingAttendance(null)}>Cancelar</button>
                 </div>

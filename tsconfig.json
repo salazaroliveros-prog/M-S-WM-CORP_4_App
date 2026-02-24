@@ -13,7 +13,10 @@
     ],
     "skipLibCheck": true,
     "types": [
-      "node"
+      "node",
+      "vite/client",
+      "react",
+      "react-dom"
     ],
     "moduleResolution": "bundler",
     "isolatedModules": true,
@@ -30,6 +33,7 @@
   },
   "exclude": [
     "supabase/functions/**",
+    "_backup_workspace/**",
     "dist/**",
     "node_modules/**"
   ]

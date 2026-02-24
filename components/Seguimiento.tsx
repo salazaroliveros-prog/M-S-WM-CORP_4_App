@@ -1681,7 +1681,7 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
   }, [selectedProjectId, execMaterials, onLoadBudget]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 w-full min-w-0 overflow-x-hidden">
       {/* Tabla de proyectos y stock de materiales */}
       <div className="bg-white p-4 rounded-xl shadow-md border border-gray-100">
         <h3 className="font-bold text-lg mb-2 text-navy-900">Stock de Materiales por Proyecto</h3>
@@ -1699,8 +1699,8 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
             ))}
           </select>
         </div>
-        {showStockTable && selectedProjectId && stockMaterials.length > 0 && (
-          <div className="overflow-x-auto mt-4">
+            <div className="mt-4 max-w-full overflow-hidden">
+              <table className="w-full text-sm text-left table-fixed">
             <table className="w-full text-sm text-left">
               <thead className="bg-gray-50">
                 <tr>
@@ -1713,8 +1713,8 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
               </thead>
               <tbody>
                 {stockMaterials.map((row, i) => (
-                  <tr key={row.name + row.unit} className={row.restante < 0 ? 'bg-red-50' : ''}>
-                    <td className="p-2">{row.name}</td>
+                      <td className="p-2 break-words">{row.name}</td>
+                      <td className="p-2 break-words">{row.unit}</td>
                     <td className="p-2">{row.unit}</td>
                     <td className="p-2 text-right">{row.presup.toFixed(2)}</td>
                     <td className="p-2 text-right">{row.comprado.toFixed(2)}</td>
@@ -1780,18 +1780,18 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
           </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm text-left">
+        <div className="max-w-full overflow-hidden">
+          <table className="w-full text-xs sm:text-sm text-left table-fixed">
             <thead className="bg-gray-50">
               <tr>
-                <th className="p-2">Fecha</th>
-                <th className="p-2">Proyecto</th>
-                <th className="p-2">Tipo</th>
-                <th className="p-2">Categoría</th>
-                <th className="p-2">Descripción</th>
-                <th className="p-2">Proveedor</th>
-                <th className="p-2 text-right">Monto</th>
-                <th className="p-2">Acciones</th>
+                <th className="p-1.5 sm:p-2">Fecha</th>
+                <th className="p-1.5 sm:p-2">Proyecto</th>
+                <th className="p-1.5 sm:p-2">Tipo</th>
+                <th className="p-1.5 sm:p-2">Categoría</th>
+                <th className="p-1.5 sm:p-2">Descripción</th>
+                <th className="p-1.5 sm:p-2">Proveedor</th>
+                <th className="p-1.5 sm:p-2 text-right">Monto</th>
+                <th className="p-1.5 sm:p-2">Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -1815,7 +1815,7 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
                 if (isEditing) {
                   return (
                     <tr key={t.id} className="border-t">
-                      <td className="p-2">
+                      <td className="p-1.5 sm:p-2">
                         <input
                           type="date"
                           className="border p-1 rounded"
@@ -1824,8 +1824,8 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
                           onChange={(e) => setEditTxDraft((p) => ({ ...p, date: e.target.value }))}
                         />
                       </td>
-                      <td className="p-2">{t.project_id ? projectNameById.get(String(t.project_id)) ?? t.project_id : '—'}</td>
-                      <td className="p-2">
+                      <td className="p-1.5 sm:p-2 break-words">{t.project_id ? projectNameById.get(String(t.project_id)) ?? t.project_id : '—'}</td>
+                      <td className="p-1.5 sm:p-2">
                         <select
                           className="border p-1 rounded"
                           title="Tipo"
@@ -1836,7 +1836,7 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
                           <option value="GASTO">GASTO</option>
                         </select>
                       </td>
-                      <td className="p-2">
+                      <td className="p-1.5 sm:p-2">
                         <input
                           className="border p-1 rounded w-full"
                           title="Categoría"
@@ -1844,7 +1844,7 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
                           onChange={(e) => setEditTxDraft((p) => ({ ...p, category: e.target.value }))}
                         />
                       </td>
-                      <td className="p-2">
+                      <td className="p-1.5 sm:p-2">
                         <input
                           className="border p-1 rounded w-full"
                           title="Descripción"
@@ -1852,7 +1852,7 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
                           onChange={(e) => setEditTxDraft((p) => ({ ...p, description: e.target.value }))}
                         />
                       </td>
-                      <td className="p-2">
+                      <td className="p-1.5 sm:p-2">
                         <input
                           className="border p-1 rounded w-full"
                           title="Proveedor"
@@ -1860,16 +1860,16 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
                           onChange={(e) => setEditTxDraft((p) => ({ ...p, provider: e.target.value }))}
                         />
                       </td>
-                      <td className="p-2 text-right">
+                      <td className="p-1.5 sm:p-2 text-right">
                         <input
-                          className="border p-1 rounded w-28 text-right"
+                          className="border p-1 rounded w-full sm:w-28 text-right"
                           title="Monto"
                           value={editTxDraft.cost}
                           onChange={(e) => setEditTxDraft((p) => ({ ...p, cost: e.target.value }))}
                         />
                       </td>
-                      <td className="p-2">
-                        <div className="flex gap-2">
+                      <td className="p-1.5 sm:p-2">
+                        <div className="flex gap-2 flex-wrap">
                           <button className="px-3 py-1 bg-navy-900 text-white rounded" type="button" onClick={submitEditTx}>
                             Guardar
                           </button>
@@ -1884,15 +1884,15 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
 
                 return (
                   <tr key={t.id} className="border-t">
-                    <td className="p-2">{dateLabel}</td>
-                    <td className="p-2">{t.project_id ? projectNameById.get(String(t.project_id)) ?? t.project_id : '—'}</td>
-                    <td className="p-2">{typeLabel}</td>
-                    <td className="p-2">{String(t.category ?? '')}</td>
-                    <td className="p-2">{String(t.description ?? '')}</td>
-                    <td className="p-2">{String(t.provider ?? '')}</td>
-                    <td className="p-2 text-right">{currency.format(Number(t.cost ?? 0) || 0)}</td>
-                    <td className="p-2">
-                      <div className="flex gap-2">
+                    <td className="p-1.5 sm:p-2">{dateLabel}</td>
+                    <td className="p-1.5 sm:p-2 break-words">{t.project_id ? projectNameById.get(String(t.project_id)) ?? t.project_id : '—'}</td>
+                    <td className="p-1.5 sm:p-2">{typeLabel}</td>
+                    <td className="p-1.5 sm:p-2 break-words">{String(t.category ?? '')}</td>
+                    <td className="p-1.5 sm:p-2 break-words">{String(t.description ?? '')}</td>
+                    <td className="p-1.5 sm:p-2 break-words">{String(t.provider ?? '')}</td>
+                    <td className="p-1.5 sm:p-2 text-right">{currency.format(Number(t.cost ?? 0) || 0)}</td>
+                    <td className="p-1.5 sm:p-2">
+                      <div className="flex gap-2 flex-wrap">
                         <button className="px-3 py-1 bg-white border border-gray-300 rounded" type="button" onClick={() => beginEditTx(t)}>
                           Editar
                         </button>
@@ -2012,11 +2012,11 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
           )}
 
           <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="bg-white p-4 rounded-lg border border-gray-200">
+            <div className="bg-white p-4 rounded-lg border border-gray-200 min-w-0 overflow-hidden">
               <div className="font-bold text-gray-700 mb-2">Ingresos vs Gastos (6 meses, global)</div>
               <div className="h-64" ref={globalLineWrapRef}>
                 <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                  <LineChart data={globalMetrics.lineData}>
+                  <LineChart data={globalMetrics.lineData} margin={{ top: 8, right: 12, left: 0, bottom: 8 }}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis
                       dataKey="name"
@@ -2025,11 +2025,17 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
                       textAnchor={globalLineWrapWidth > 0 && globalLineWrapWidth < 420 ? 'end' : 'middle'}
                       height={globalLineWrapWidth > 0 && globalLineWrapWidth < 420 ? 50 : 30}
                       minTickGap={10}
+                      tickMargin={8}
                       tick={{ fontSize: globalLineWrapWidth > 0 && globalLineWrapWidth < 420 ? 10 : 12 }}
                     />
                     <YAxis />
                     <Tooltip formatter={(v: any) => currency.format(Number(v) || 0)} />
-                    <Legend />
+                    <Legend
+                      verticalAlign="top"
+                      height={globalLineWrapWidth > 0 && globalLineWrapWidth < 420 ? 44 : 36}
+                      iconSize={10}
+                      wrapperStyle={{ fontSize: globalLineWrapWidth > 0 && globalLineWrapWidth < 420 ? 10 : 12 }}
+                    />
                     <Line type="monotone" dataKey="ingresos" stroke="#22c55e" strokeWidth={3} />
                     <Line type="monotone" dataKey="gastos" stroke="#ef4444" strokeWidth={3} />
                   </LineChart>
@@ -2037,11 +2043,11 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
               </div>
             </div>
 
-            <div className="bg-white p-4 rounded-lg border border-gray-200">
+            <div className="bg-white p-4 rounded-lg border border-gray-200 min-w-0 overflow-hidden">
               <div className="font-bold text-gray-700 mb-2">¿En qué se gasta? (global)</div>
               <div className="h-64" ref={globalPieWrapRef}>
                 <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                  <PieChart>
+                  <PieChart margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
                     <Pie
                       data={globalMetrics.expensePie}
                       dataKey="value"
@@ -2065,7 +2071,12 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
                       ))}
                     </Pie>
                     <Tooltip formatter={(v: any) => currency.format(Number(v) || 0)} />
-                    <Legend />
+                    <Legend
+                      verticalAlign="bottom"
+                      height={globalPieWrapWidth > 0 && globalPieWrapWidth < 420 ? 58 : 48}
+                      iconSize={10}
+                      wrapperStyle={{ fontSize: globalPieWrapWidth > 0 && globalPieWrapWidth < 420 ? 10 : 12 }}
+                    />
                   </PieChart>
                 </ResponsiveContainer>
               </div>
@@ -2083,8 +2094,8 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
             />
           </div>
 
-          <div className="mt-4 overflow-x-auto">
-            <table className="w-full text-sm">
+          <div className="mt-4 max-w-full overflow-hidden">
+            <table className="w-full text-sm table-fixed">
               <thead className="bg-gray-50 text-gray-700 font-bold">
                 <tr>
                   <th className="p-3 text-left">Proyecto</th>
@@ -2100,12 +2111,12 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
                   const barPct = Number.isFinite(pct) ? Math.round(pct * 100) : 0;
                   return (
                     <tr key={p.id} className="hover:bg-gray-50">
-                      <td className="p-3 font-semibold text-navy-900">{p.name}</td>
-                      <td className="p-3 text-gray-600">{p.clientName}</td>
+                      <td className="p-3 font-semibold text-navy-900 break-words">{p.name}</td>
+                      <td className="p-3 text-gray-600 break-words">{p.clientName}</td>
                       <td className="p-3 text-right">
                         <div className="flex items-center justify-end gap-3">
                           <progress
-                            className="w-40 h-2.5"
+                            className="w-full sm:w-40 h-2.5"
                             value={barPct}
                             max={100}
                             aria-label={`Avance de ${p.name}`}
@@ -2213,11 +2224,11 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="bg-white p-4 rounded-xl shadow border border-gray-200">
+            <div className="bg-white p-4 rounded-xl shadow border border-gray-200 min-w-0 overflow-hidden">
               <div className="font-bold text-gray-700 mb-2">Ingresos vs Gastos (6 meses, proyecto)</div>
               <div className="h-64" ref={projectLineWrapRef}>
                 <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                  <LineChart data={selectedProjectMetrics?.lineData ?? []}>
+                  <LineChart data={selectedProjectMetrics?.lineData ?? []} margin={{ top: 8, right: 12, left: 0, bottom: 8 }}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis
                       dataKey="name"
@@ -2226,11 +2237,17 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
                       textAnchor={projectLineWrapWidth > 0 && projectLineWrapWidth < 420 ? 'end' : 'middle'}
                       height={projectLineWrapWidth > 0 && projectLineWrapWidth < 420 ? 50 : 30}
                       minTickGap={10}
+                      tickMargin={8}
                       tick={{ fontSize: projectLineWrapWidth > 0 && projectLineWrapWidth < 420 ? 10 : 12 }}
                     />
                     <YAxis />
                     <Tooltip formatter={(v: any) => currency.format(Number(v) || 0)} />
-                    <Legend />
+                    <Legend
+                      verticalAlign="top"
+                      height={projectLineWrapWidth > 0 && projectLineWrapWidth < 420 ? 44 : 36}
+                      iconSize={10}
+                      wrapperStyle={{ fontSize: projectLineWrapWidth > 0 && projectLineWrapWidth < 420 ? 10 : 12 }}
+                    />
                     <Line type="monotone" dataKey="ingresos" stroke="#22c55e" strokeWidth={3} />
                     <Line type="monotone" dataKey="gastos" stroke="#ef4444" strokeWidth={3} />
                   </LineChart>
@@ -2238,11 +2255,11 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
               </div>
             </div>
 
-            <div className="bg-white p-4 rounded-xl shadow border border-gray-200">
+            <div className="bg-white p-4 rounded-xl shadow border border-gray-200 min-w-0 overflow-hidden">
               <div className="font-bold text-gray-700 mb-2">¿En qué se gasta? (proyecto)</div>
               <div className="h-64" ref={projectPieWrapRef}>
                 <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                  <PieChart>
+                  <PieChart margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
                     <Pie
                       data={selectedProjectMetrics?.expensePie ?? [{ name: 'Sin gastos', value: 1 }]} 
                       dataKey="value"
@@ -2267,14 +2284,19 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
                       ))}
                     </Pie>
                     <Tooltip formatter={(v: any) => currency.format(Number(v) || 0)} />
-                    <Legend />
+                    <Legend
+                      verticalAlign="bottom"
+                      height={projectPieWrapWidth > 0 && projectPieWrapWidth < 420 ? 58 : 48}
+                      iconSize={10}
+                      wrapperStyle={{ fontSize: projectPieWrapWidth > 0 && projectPieWrapWidth < 420 ? 10 : 12 }}
+                    />
                   </PieChart>
                 </ResponsiveContainer>
               </div>
             </div>
           </div>
 
-          <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+          <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden min-w-0">
           <div className="p-4 bg-navy-900 text-white flex items-center justify-between gap-3 flex-wrap">
             <div>
               <div className="text-xs text-gray-300">Seguimiento por Renglón</div>
@@ -2285,7 +2307,7 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
               <div className="text-xs text-gray-300">Avance global (ponderado)</div>
               <div className="text-2xl font-extrabold">{Math.round(overallPct * 100)}%</div>
               <progress
-                className="w-56 h-2.5 mt-1"
+                className="w-full sm:w-56 h-2.5 mt-1"
                 value={Math.round(overallPct * 100)}
                 max={100}
                 aria-label="Avance global"
@@ -2319,6 +2341,7 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
                       ejec: Math.round(Number(l.completedQty) || 0),
                     }));
                   })()}
+                  margin={{ top: 8, right: 12, left: 0, bottom: 8 }}
                 >
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis
@@ -2339,6 +2362,7 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
                     })()}
                     tick={{ fontSize: (topBarsWrapWidth > 0 && topBarsWrapWidth < 420) ? 10 : 12 }}
                     minTickGap={6}
+                    tickMargin={8}
                     textAnchor="end"
                     height={(() => {
                       if (topBarsWrapWidth > 0 && topBarsWrapWidth < 420) return 90;
@@ -2348,7 +2372,12 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
                   />
                   <YAxis />
                   <Tooltip />
-                  <Legend />
+                  <Legend
+                    verticalAlign="top"
+                    height={topBarsWrapWidth > 0 && topBarsWrapWidth < 420 ? 44 : 36}
+                    iconSize={10}
+                    wrapperStyle={{ fontSize: topBarsWrapWidth > 0 && topBarsWrapWidth < 420 ? 10 : 12 }}
+                  />
                   <Bar dataKey="plan" fill="#64748b" name="Planificado" />
                   <Bar dataKey="ejec" fill="#0ea5e9" name="Ejecutado" />
                 </BarChart>
@@ -2360,17 +2389,17 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
             {progressLines.length === 0 ? (
               <div className="text-gray-500">No hay renglones cargados.</div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+              <div className="max-w-full overflow-hidden">
+                <table className="w-full text-xs sm:text-sm table-fixed">
                   <thead className="bg-gray-50 text-gray-700 font-bold">
                     <tr>
-                      <th className="p-3 text-left">Renglón</th>
-                      <th className="p-3 text-center">Unidad</th>
-                      <th className="p-3 text-right">Cantidad Presup.</th>
-                      <th className="p-3 text-right">Cantidad Ejecutada</th>
-                      <th className="p-3 text-right">%</th>
-                      <th className="p-3">Avance</th>
-                      <th className="p-3 text-left">Notas</th>
+                      <th className="p-2 sm:p-3 text-left">Renglón</th>
+                      <th className="p-2 sm:p-3 text-center hidden sm:table-cell">Unidad</th>
+                      <th className="p-2 sm:p-3 text-right">Cant. Presup.</th>
+                      <th className="p-2 sm:p-3 text-right">Cant. Ejec.</th>
+                      <th className="p-2 sm:p-3 text-right">%</th>
+                      <th className="p-2 sm:p-3 hidden md:table-cell">Avance</th>
+                      <th className="p-2 sm:p-3 text-left hidden md:table-cell">Notas</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
@@ -2379,33 +2408,33 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
                       const pct100 = Math.round(pct * 100);
                       return (
                         <tr key={l.key} className="hover:bg-gray-50">
-                          <td className="p-3 font-medium text-navy-900">{l.name}</td>
-                          <td className="p-3 text-center text-gray-600">{l.unit}</td>
-                          <td className="p-3 text-right font-mono">{l.plannedQty.toFixed(2)}</td>
-                          <td className="p-3 text-right">
+                          <td className="p-2 sm:p-3 font-medium text-navy-900 break-words">{l.name}</td>
+                          <td className="p-2 sm:p-3 text-center text-gray-600 hidden sm:table-cell break-words">{l.unit}</td>
+                          <td className="p-2 sm:p-3 text-right font-mono break-words">{l.plannedQty.toFixed(2)}</td>
+                          <td className="p-2 sm:p-3 text-right">
                             <input
                               type="number"
                               min={0}
                               step="0.01"
                               value={Number.isFinite(l.completedQty) ? l.completedQty : 0}
                               onChange={(e) => handleChangeCompleted(l.key, parseFloat(e.target.value) || 0)}
-                              className="w-28 p-2 border rounded text-right focus:ring-mustard-500 focus:border-mustard-500"
+                              className="w-full sm:w-28 p-2 border rounded text-right focus:ring-mustard-500 focus:border-mustard-500"
                               placeholder="0.00"
                               aria-label={`Cantidad ejecutada: ${l.name}`}
                               title={`Cantidad ejecutada (${l.unit})`}
                             />
                           </td>
-                          <td className="p-3 text-right font-bold">{pct100}%</td>
-                          <td className="p-3">
+                          <td className="p-2 sm:p-3 text-right font-bold">{pct100}%</td>
+                          <td className="p-2 sm:p-3 hidden md:table-cell">
                             <progress
-                              className="w-40 h-2.5"
+                              className="w-full sm:w-40 h-2.5"
                               value={pct100}
                               max={100}
                               aria-label={`Avance: ${l.name}`}
                               title={`${pct100}%`}
                             />
                           </td>
-                          <td className="p-3">
+                          <td className="p-2 sm:p-3 hidden md:table-cell">
                             <input
                               type="text"
                               value={l.notes}
@@ -2427,7 +2456,7 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
       )}
 
       {selectedProject && (
-        <div className="bg-white p-6 rounded-xl shadow-md">
+        <div className="bg-white p-6 rounded-xl shadow-md min-w-0 overflow-x-hidden">
           <div className="flex items-center justify-between gap-3 mb-3">
             <div>
               <div className="font-bold text-navy-900">Cronograma (Gantt) por renglón</div>
@@ -2436,7 +2465,7 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
               </div>
             </div>
             {gantt.start && gantt.end && (
-              <div className="text-xs text-gray-600">
+              <div className="text-xs text-gray-600 min-w-0">
                 <div><span className="font-semibold">Inicio:</span> {gantt.start}</div>
                 <div><span className="font-semibold">Fin:</span> {gantt.end}</div>
               </div>
@@ -2451,25 +2480,27 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
             <div className="space-y-3">
               <div className="rounded border overflow-hidden">
                 <div className="hidden sm:grid bg-gray-50 px-3 py-2 text-xs text-gray-600 sm:grid-cols-12 gap-2">
-                  <div className="sm:col-span-5 font-semibold">Renglón</div>
-                  <div className="sm:col-span-2 font-semibold">Duración</div>
-                  <div className="sm:col-span-2 font-semibold">Inicio</div>
-                  <div className="sm:col-span-2 font-semibold">Fin</div>
-                  <div className="sm:col-span-1 font-semibold text-right">Holg.</div>
+                  <div className="sm:col-span-5 font-semibold min-w-0 truncate whitespace-nowrap">Renglón</div>
+                  <div className="sm:col-span-2 font-semibold min-w-0 truncate whitespace-nowrap">Duración</div>
+                  <div className="sm:col-span-2 font-semibold min-w-0 truncate whitespace-nowrap">Inicio</div>
+                  <div className="sm:col-span-2 font-semibold min-w-0 truncate whitespace-nowrap">Fin</div>
+                  <div className="sm:col-span-1 font-semibold text-right min-w-0 truncate whitespace-nowrap">Holg.</div>
                 </div>
 
                 {gantt.tasks.map((t) => (
                   <div key={t.key} className="px-3 py-2 border-t">
                     <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 sm:items-center">
                       <div className="sm:col-span-5 min-w-0">
-                        <div className="text-sm font-semibold text-navy-900 break-words leading-snug">
-                          {t.name}
+                        <div className="flex items-start gap-2 min-w-0">
+                          <div className="flex-1 min-w-0 text-sm font-semibold text-navy-900 break-words leading-snug">
+                            {t.name}
+                          </div>
                           {t.isCritical ? (
-                            <span className="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-red-100 text-red-700">CRÍTICO</span>
+                            <span className="shrink-0 text-[10px] px-2 py-0.5 rounded-full bg-red-100 text-red-700 whitespace-nowrap">CRÍTICO</span>
                           ) : null}
                         </div>
                         <div className="text-[11px] text-gray-500 break-words">{t.qty ? `${Math.round(t.qty * 1000) / 1000} ${t.unit}` : t.unit}</div>
-                        <div className="mt-2 h-2 bg-gray-100 rounded relative overflow-hidden">
+                        <div className="mt-2 h-2 bg-gray-100 rounded relative overflow-hidden w-full min-w-0">
                           <div
                             className={
                               (t.isCritical ? 'absolute top-0 h-2 bg-navy-900 rounded ' : 'absolute top-0 h-2 bg-mustard-500 rounded ') +
@@ -2488,10 +2519,10 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
                         </div>
                       </div>
 
-                      <div className="hidden sm:block sm:col-span-2 text-sm text-gray-700">{t.durationDays} día(s)</div>
-                      <div className="hidden sm:block sm:col-span-2 text-sm text-gray-700">{t.start}</div>
-                      <div className="hidden sm:block sm:col-span-2 text-sm text-gray-700">{t.end}</div>
-                      <div className="hidden sm:block sm:col-span-1 text-sm text-gray-700 text-right">{t.slackDays}</div>
+                      <div className="hidden sm:block sm:col-span-2 text-xs lg:text-sm text-gray-700 min-w-0 truncate whitespace-nowrap">{t.durationDays} día(s)</div>
+                      <div className="hidden sm:block sm:col-span-2 text-xs lg:text-sm text-gray-700 min-w-0 truncate whitespace-nowrap">{t.start}</div>
+                      <div className="hidden sm:block sm:col-span-2 text-xs lg:text-sm text-gray-700 min-w-0 truncate whitespace-nowrap">{t.end}</div>
+                      <div className="hidden sm:block sm:col-span-1 text-xs lg:text-sm text-gray-700 text-right min-w-0 truncate whitespace-nowrap">{t.slackDays}</div>
                     </div>
                   </div>
                 ))}
@@ -2529,10 +2560,10 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
           )}
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-4">
-            <div className="bg-white p-4 rounded-xl shadow border border-gray-200">
+            <div className="bg-white p-4 rounded-xl shadow border border-gray-200 min-w-0 overflow-hidden">
               <div className="font-bold text-gray-700 mb-2">Cantidades (top materiales)</div>
               <div className="h-72">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                   <BarChart
                     data={(materialComparisons?.top ?? []).map((r) => {
                       const maxChars = 14;
@@ -2543,12 +2574,22 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
                         ejec: Math.round((Number(r.execQty) || 0) * 100) / 100,
                       };
                     })}
+                    margin={{ top: 8, right: 12, left: 0, bottom: 8 }}
                   >
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="name" interval={1} angle={-25} textAnchor="end" height={60} />
+                    <XAxis
+                      dataKey="name"
+                      interval="preserveStartEnd"
+                      angle={-35}
+                      textAnchor="end"
+                      height={70}
+                      minTickGap={12}
+                      tickMargin={8}
+                      tick={{ fontSize: 10 }}
+                    />
                     <YAxis />
                     <Tooltip />
-                    <Legend />
+                    <Legend verticalAlign="top" height={36} iconSize={10} wrapperStyle={{ fontSize: 12 }} />
                     <Bar dataKey="plan" fill="#64748b" name="Planificado" />
                     <Bar dataKey="ejec" fill="#0ea5e9" name="Ejecutado" />
                   </BarChart>
@@ -2556,10 +2597,10 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
               </div>
             </div>
 
-            <div className="bg-white p-4 rounded-xl shadow border border-gray-200">
+            <div className="bg-white p-4 rounded-xl shadow border border-gray-200 min-w-0 overflow-hidden">
               <div className="font-bold text-gray-700 mb-2">Costos (top materiales)</div>
               <div className="h-72">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                   <BarChart
                     data={(materialComparisons?.top ?? []).map((r) => {
                       const maxChars = 14;
@@ -2570,16 +2611,26 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
                         real: Math.round(Number(r.execCost) || 0),
                       };
                     })}
+                    margin={{ top: 8, right: 12, left: 0, bottom: 8 }}
                   >
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="name" interval={1} angle={-25} textAnchor="end" height={60} />
+                    <XAxis
+                      dataKey="name"
+                      interval="preserveStartEnd"
+                      angle={-35}
+                      textAnchor="end"
+                      height={70}
+                      minTickGap={12}
+                      tickMargin={8}
+                      tick={{ fontSize: 10 }}
+                    />
                     <YAxis tickFormatter={(v: any) => {
                       const n = Number(v) || 0;
                       if (Math.abs(n) >= 1000) return `${Math.round(n / 1000)}k`;
                       return String(Math.round(n));
                     }} />
                     <Tooltip formatter={(v: any) => currency.format(Number(v) || 0)} />
-                    <Legend />
+                    <Legend verticalAlign="top" height={36} iconSize={10} wrapperStyle={{ fontSize: 12 }} />
                     <Bar dataKey="plan" fill="#f59e0b" name="Planificado" />
                     <Bar dataKey="real" fill="#22c55e" name="Real (factura)" />
                   </BarChart>

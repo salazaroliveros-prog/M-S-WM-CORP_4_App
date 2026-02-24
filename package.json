@@ -28,6 +28,8 @@
   "devDependencies": {
     "@types/leaflet": "^1.9.21",
     "@types/node": "^22.14.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.0.0",
     "autoprefixer": "^10.4.24",
     "dotenv": "^17.2.3",
