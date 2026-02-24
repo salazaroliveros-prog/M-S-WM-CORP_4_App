@@ -137,6 +137,8 @@ const WorkerAttendance: React.FC = () => {
   const [webauthnBusy, setWebauthnBusy] = useState(false);
   const [sending, setSending] = useState(false);
   const [lastResult, setLastResult] = useState<any | null>(null);
+  const [lastPingAtIso, setLastPingAtIso] = useState<string>('');
+  const [lastPingStatus, setLastPingStatus] = useState<'idle' | 'ok' | 'queued' | 'disabled' | 'error'>('idle');
 
   // If the server says "check-in required", stop pinging until a successful check-in/out happens.
   const pingDisabledRef = useRef(false);
@@ -377,7 +379,7 @@ const WorkerAttendance: React.FC = () => {
         watcherId = await BackgroundGeolocation.addWatcher(
           {
             requestPermissions: true,
-            stale: true,
+            stale: false,
             distanceFilter: 0,
             backgroundTitle: 'M&S Construcción',
             backgroundMessage: 'Rastreando ubicación para asistencia',
@@ -395,6 +397,9 @@ const WorkerAttendance: React.FC = () => {
               lng: pos.longitude,
               accuracyM: pos.accuracy,
             });
+
+            // In native, try pinging immediately on location updates.
+            void attemptPing({ lat: pos.latitude, lng: pos.longitude, accuracyM: pos.accuracy });
           }
         );
       } catch (e: any) {
@@ -417,44 +422,58 @@ const WorkerAttendance: React.FC = () => {
 
   const lastPingAtRef = useRef(0);
 
-  const pingLocation = async () => {
+  const attemptPing = async (next: { lat: number; lng: number; accuracyM?: number | null }) => {
     if (!token) return;
-    if (pingDisabledRef.current) return;
-    const g = geoRef.current;
-    if (g.status !== 'ready' || g.lat === undefined || g.lng === undefined) return;
+
+    if (pingDisabledRef.current) {
+      setLastPingStatus('disabled');
+      return;
+    }
 
     const now = Date.now();
     if (lastPingAtRef.current && now - lastPingAtRef.current < 60_000) return;
     lastPingAtRef.current = now;
+    setLastPingAtIso(new Date(now).toISOString());
 
     const payload = {
       token,
       workDate,
-      lat: g.lat,
-      lng: g.lng,
-      accuracyM: g.accuracyM ?? null,
+      lat: next.lat,
+      lng: next.lng,
+      accuracyM: next.accuracyM ?? null,
       device: deviceInfo,
     };
 
     try {
       await pingAttendanceLocationWithToken(payload);
+      setLastPingStatus('ok');
     } catch (e: any) {
       const msg = String(e?.message || '').toLowerCase();
       if (msg.includes('marque entrada primero')) {
         pingDisabledRef.current = true;
+        setLastPingStatus('disabled');
         return;
       }
 
       // Offline-first fallback: queue pings and retry when online.
       try {
         const pending = readJson<any[]>(PENDING_WORKER_LOCATION_PINGS_KEY, []);
-        const next = Array.isArray(pending) ? pending : [];
-        next.push({ id: crypto.randomUUID(), queuedAt: new Date().toISOString(), payload });
-        writeJson(PENDING_WORKER_LOCATION_PINGS_KEY, next);
+        const nextQueue = Array.isArray(pending) ? pending : [];
+        nextQueue.push({ id: crypto.randomUUID(), queuedAt: new Date().toISOString(), payload });
+        writeJson(PENDING_WORKER_LOCATION_PINGS_KEY, nextQueue);
+        setLastPingStatus('queued');
       } catch {
-        // ignore
+        setLastPingStatus('error');
       }
     }
+  };
+
+  const pingLocation = async () => {
+    if (!token) return;
+    const g = geoRef.current;
+    if (g.status !== 'ready' || g.lat === undefined || g.lng === undefined) return;
+
+    await attemptPing({ lat: g.lat, lng: g.lng, accuracyM: g.accuracyM ?? null });
   };
 
   // Ping every 1 minute (best-effort). Browsers may throttle timers in background.
@@ -563,6 +582,15 @@ const WorkerAttendance: React.FC = () => {
     ]);
   };
 
+  const openNativeLocationSettings = async () => {
+    if (!isNative) return;
+    try {
+      await BackgroundGeolocation.openSettings();
+    } catch {
+      // ignore
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 p-4 sm:p-6 overflow-x-hidden">
       <div className="max-w-3xl mx-auto space-y-4">
@@ -666,8 +694,37 @@ const WorkerAttendance: React.FC = () => {
             <div className="font-semibold text-navy-900">GPS</div>
             {geo.status === 'idle' && <div className="text-gray-600">Solicitando ubicación…</div>}
             {geo.status === 'loading' && <div className="text-gray-600">Obteniendo ubicación…</div>}
-            {geo.status === 'error' && <div className="text-red-600">{geo.error}</div>}
+            {geo.status === 'error' && (
+              <div className="text-red-600">
+                {geo.error}
+                {isNative && (
+                  <div className="mt-2">
+                    <button
+                      type="button"
+                      className="px-3 py-1 rounded border bg-white hover:bg-gray-50 text-xs"
+                      onClick={openNativeLocationSettings}
+                      title="Abrir ajustes de ubicación"
+                    >
+                      Abrir ajustes
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
             {geo.status === 'ready' && <div className="text-gray-700">Ubicación lista{geo.accuracyM ? ` (±${Math.round(geo.accuracyM)}m)` : ''}.</div>}
+            <div className="text-[11px] text-gray-500 mt-1">
+              Modo: <span className="font-semibold">{isNative ? 'Nativo (Android)' : 'Web/PWA'}</span>
+              {lastPingAtIso ? (
+                <>
+                  {' '}• Último ping: <span className="font-semibold">{new Date(lastPingAtIso).toLocaleTimeString()}</span>
+                </>
+              ) : null}
+              {lastPingStatus !== 'idle' ? (
+                <>
+                  {' '}• Estado: <span className="font-semibold">{lastPingStatus}</span>
+                </>
+              ) : null}
+            </div>
           </div>
 
           <div className="flex flex-col sm:flex-row gap-2 mt-4">
