@@ -269,7 +269,7 @@ const Cotizador: React.FC<Props> = ({ initialData, syncVersion, onListQuotes, on
   };
 
   return (
-    <div className="max-w-3xl mx-auto bg-white p-8 rounded-xl shadow-lg border-t-8 border-mustard-500 print:shadow-none print:border-none print:w-full print:max-w-none">
+    <div className="max-w-3xl mx-auto bg-white p-4 sm:p-8 rounded-xl shadow-lg border-t-8 border-mustard-500 print:shadow-none print:border-none print:w-full print:max-w-none">
       <style>
         {`
           @media print {
@@ -293,16 +293,16 @@ const Cotizador: React.FC<Props> = ({ initialData, syncVersion, onListQuotes, on
       </style>
       
       <div className="print-content">
-        <div className="flex justify-between items-start mb-8 border-b pb-4">
-           <div>
-             <h2 className="text-2xl font-bold text-navy-900">CONSTRUCTORA WM/M&S</h2>
-             <p className="text-gray-500 tracking-wider text-xs">EDIFICANDO EL FUTURO</p>
-           </div>
-           <div className="text-right text-xs text-gray-400">
-             <p>Barrio El Centro, Quesada Jutiapa</p>
-             <p>Tel: 55606172</p>
-             <p>multiserviciosdeguatemal@gmail.com</p>
-           </div>
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 mb-8 border-b pb-4">
+          <div className="min-w-0">
+            <h2 className="text-2xl font-bold text-navy-900 break-words">CONSTRUCTORA WM/M&S</h2>
+            <p className="text-gray-500 tracking-wider text-xs">EDIFICANDO EL FUTURO</p>
+          </div>
+          <div className="text-left sm:text-right text-xs text-gray-400 break-words">
+            <p>Barrio El Centro, Quesada Jutiapa</p>
+            <p>Tel: 55606172</p>
+            <p>multiserviciosdeguatemal@gmail.com</p>
+          </div>
         </div>
 
         <h3 className="text-xl font-bold mb-4 text-center">COTIZACIÓN DE SERVICIOS</h3>
@@ -383,29 +383,29 @@ const Cotizador: React.FC<Props> = ({ initialData, syncVersion, onListQuotes, on
         </div>
       </div>
 
-      <div className="flex space-x-4 no-print">
+      <div className="flex flex-col sm:flex-row gap-3 no-print">
         <button 
           onClick={handlePrint}
-          className="flex-1 bg-navy-900 text-white py-3 rounded font-bold flex items-center justify-center space-x-2 hover:bg-navy-800 transition-colors"
+          className="w-full sm:flex-1 bg-navy-900 text-white py-3 rounded font-bold flex items-center justify-center gap-2 hover:bg-navy-800 transition-colors"
         >
           <Printer size={20} />
-          <span>Imprimir / Guardar PDF</span>
+          <span className="text-center leading-tight">Imprimir / Guardar PDF</span>
         </button>
         {canUseHistory && (
           <button 
             onClick={handleSaveToHistory}
-            className="flex-1 bg-mustard-500 text-navy-900 py-3 rounded font-bold hover:bg-mustard-600 flex items-center justify-center space-x-2 transition-colors"
+            className="w-full sm:flex-1 bg-mustard-500 text-navy-900 py-3 rounded font-bold hover:bg-mustard-600 flex items-center justify-center gap-2 transition-colors"
           >
             <Save size={20} />
-            <span>Guardar al Historial</span>
+            <span className="text-center leading-tight">Guardar al Historial</span>
           </button>
         )}
         <button 
           onClick={handleSend}
-          className="flex-1 bg-green-600 text-white py-3 rounded font-bold hover:bg-green-700 flex items-center justify-center space-x-2 transition-colors"
+          className="w-full sm:flex-1 bg-green-600 text-white py-3 rounded font-bold hover:bg-green-700 flex items-center justify-center gap-2 transition-colors"
         >
           <Share2 size={20} />
-          <span>Enviar por WhatsApp</span>
+          <span className="text-center leading-tight">Enviar por WhatsApp</span>
         </button>
       </div>
 
@@ -440,43 +440,85 @@ const Cotizador: React.FC<Props> = ({ initialData, syncVersion, onListQuotes, on
             <div className="text-sm text-gray-500 border rounded p-4">No hay cotizaciones guardadas.</div>
           ) : (
             <div className="border rounded overflow-hidden">
-              <div className="grid grid-cols-12 gap-2 bg-gray-50 text-xs font-bold text-gray-600 px-3 py-2">
+              <div className="hidden md:grid grid-cols-12 gap-2 bg-gray-50 text-xs font-bold text-gray-600 px-3 py-2">
                 <div className="col-span-3">Cliente</div>
                 <div className="col-span-3">Servicio</div>
                 <div className="col-span-2">Total</div>
                 <div className="col-span-2">Fecha</div>
                 <div className="col-span-2 text-right">Acciones</div>
               </div>
-              {quotes.slice(0, 20).map((q) => (
-                <div key={q.id} className="grid grid-cols-12 gap-2 px-3 py-2 text-sm border-t items-center">
-                  <div className="col-span-3">
-                    <div className="font-semibold text-navy-900">{q.client}</div>
-                    <div className="text-xs text-gray-500">{q.phone || ''}</div>
+
+              <div className="md:hidden divide-y">
+                {quotes.slice(0, 20).map((q) => (
+                  <div key={q.id} className="p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="font-semibold text-navy-900 break-words">{q.client}</div>
+                        <div className="text-xs text-gray-500 break-words">{q.phone || ''}</div>
+                      </div>
+                      <div className="text-right">
+                        <div className="font-bold text-mustard-600">Q{Number(q.total ?? 0).toFixed(2)}</div>
+                        <div className="text-xs text-gray-500">{new Date(q.createdAt).toLocaleString()}</div>
+                      </div>
+                    </div>
+
+                    <div className="mt-2 text-sm">
+                      <div className="font-semibold break-words">{q.serviceName}</div>
+                      <div className="text-xs text-gray-500">{q.quantity} {q.unit || ''}</div>
+                    </div>
+
+                    <div className="mt-3 flex gap-2">
+                      <button
+                        onClick={() => handleLoadQuote(q)}
+                        className="flex-1 px-3 py-2 text-xs font-bold rounded bg-navy-900 text-white hover:bg-navy-800"
+                      >
+                        Cargar
+                      </button>
+                      <button
+                        onClick={() => handleDeleteFromHistory(q.id)}
+                        className="flex-1 px-3 py-2 text-xs font-bold rounded border hover:bg-gray-50 text-red-700 flex items-center justify-center gap-1"
+                        title="Eliminar"
+                      >
+                        <Trash2 size={14} />
+                        Eliminar
+                      </button>
+                    </div>
                   </div>
-                  <div className="col-span-3">
-                    <div className="font-semibold">{q.serviceName}</div>
-                    <div className="text-xs text-gray-500">{q.quantity} {q.unit || ''}</div>
+                ))}
+              </div>
+
+              <div className="hidden md:block">
+                {quotes.slice(0, 20).map((q) => (
+                  <div key={q.id} className="grid grid-cols-12 gap-2 px-3 py-2 text-sm border-t items-center">
+                    <div className="col-span-3 min-w-0">
+                      <div className="font-semibold text-navy-900 break-words">{q.client}</div>
+                      <div className="text-xs text-gray-500 break-words">{q.phone || ''}</div>
+                    </div>
+                    <div className="col-span-3 min-w-0">
+                      <div className="font-semibold break-words">{q.serviceName}</div>
+                      <div className="text-xs text-gray-500">{q.quantity} {q.unit || ''}</div>
+                    </div>
+                    <div className="col-span-2 font-bold text-mustard-600">Q{Number(q.total ?? 0).toFixed(2)}</div>
+                    <div className="col-span-2 text-xs text-gray-500">{new Date(q.createdAt).toLocaleString()}</div>
+                    <div className="col-span-2 flex justify-end gap-2">
+                      <button
+                        onClick={() => handleLoadQuote(q)}
+                        className="px-3 py-2 text-xs font-bold rounded bg-navy-900 text-white hover:bg-navy-800"
+                      >
+                        Cargar
+                      </button>
+                      <button
+                        onClick={() => handleDeleteFromHistory(q.id)}
+                        className="px-3 py-2 text-xs font-bold rounded border hover:bg-gray-50 text-red-700 flex items-center gap-1"
+                        title="Eliminar"
+                      >
+                        <Trash2 size={14} />
+                        Eliminar
+                      </button>
+                    </div>
                   </div>
-                  <div className="col-span-2 font-bold text-mustard-600">Q{Number(q.total ?? 0).toFixed(2)}</div>
-                  <div className="col-span-2 text-xs text-gray-500">{new Date(q.createdAt).toLocaleString()}</div>
-                  <div className="col-span-2 flex justify-end gap-2">
-                    <button
-                      onClick={() => handleLoadQuote(q)}
-                      className="px-3 py-2 text-xs font-bold rounded bg-navy-900 text-white hover:bg-navy-800"
-                    >
-                      Cargar
-                    </button>
-                    <button
-                      onClick={() => handleDeleteFromHistory(q.id)}
-                      className="px-3 py-2 text-xs font-bold rounded border hover:bg-gray-50 text-red-700 flex items-center gap-1"
-                      title="Eliminar"
-                    >
-                      <Trash2 size={14} />
-                      Eliminar
-                    </button>
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           )}
         </div>

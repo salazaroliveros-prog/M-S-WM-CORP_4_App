@@ -15,6 +15,26 @@ export function isPushSupported() {
   return typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
 }
 
+async function resolveVapidPublicKey(): Promise<string> {
+  const fromEnv = String((import.meta as any).env?.VITE_WEB_PUSH_PUBLIC_KEY ?? '').trim();
+  if (fromEnv) return fromEnv;
+
+  // Fallback: fetch from Supabase Edge Function (useful for deployed builds where
+  // client env vars aren't injected).
+  if (!isSupabaseConfigured) return '';
+  try {
+    const supabase = getSupabaseClient();
+    const { data, error } = await supabase.functions.invoke('push', {
+      body: { action: 'publicKey' },
+    });
+    if (error) throw error;
+    const key = String((data as any)?.publicKey ?? '').trim();
+    return key;
+  } catch {
+    return '';
+  }
+}
+
 export async function getPushStatus() {
   if (!isPushSupported()) {
     return { supported: false, permission: 'unsupported' as const, subscribed: false };
@@ -30,9 +50,9 @@ export async function ensurePushEnabled(input: { orgId: string }) {
   if (!isSupabaseConfigured) throw new Error('Supabase no está configurado; push requiere modo nube.');
   if (!input.orgId) throw new Error('orgId requerido');
 
-  const vapidPublicKey = String((import.meta as any).env?.VITE_WEB_PUSH_PUBLIC_KEY ?? '').trim();
+  const vapidPublicKey = await resolveVapidPublicKey();
   if (!vapidPublicKey) {
-    throw new Error('Falta VITE_WEB_PUSH_PUBLIC_KEY');
+    throw new Error('No se pudo obtener la VAPID public key (configure VITE_WEB_PUSH_PUBLIC_KEY o despliegue la función Supabase "push").');
   }
 
   const permission = await Notification.requestPermission();

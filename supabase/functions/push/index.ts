@@ -76,6 +76,12 @@ Deno.serve(async (req) => {
       body = {};
     }
 
+    // Lightweight helper: allow client to fetch the VAPID public key at runtime.
+    // Still requires a valid Supabase session token (validated above).
+    if (String(body?.action ?? '') === 'publicKey') {
+      return json({ ok: true, publicKey: VAPID_PUBLIC_KEY }, { status: 200, headers });
+    }
+
     const orgId = String(body?.orgId ?? '').trim();
     const title = String(body?.title ?? 'Notificación');
     const msgBody = String(body?.body ?? '');

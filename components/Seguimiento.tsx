@@ -2450,38 +2450,49 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
           ) : (
             <div className="space-y-3">
               <div className="rounded border overflow-hidden">
-                <div className="bg-gray-50 px-3 py-2 text-xs text-gray-600 grid grid-cols-12 gap-2">
-                  <div className="col-span-5 font-semibold">Renglón</div>
-                  <div className="col-span-2 font-semibold">Duración</div>
-                  <div className="col-span-2 font-semibold">Inicio</div>
-                  <div className="col-span-2 font-semibold">Fin</div>
-                  <div className="col-span-1 font-semibold text-right">Holg.</div>
+                <div className="hidden sm:grid bg-gray-50 px-3 py-2 text-xs text-gray-600 sm:grid-cols-12 gap-2">
+                  <div className="sm:col-span-5 font-semibold">Renglón</div>
+                  <div className="sm:col-span-2 font-semibold">Duración</div>
+                  <div className="sm:col-span-2 font-semibold">Inicio</div>
+                  <div className="sm:col-span-2 font-semibold">Fin</div>
+                  <div className="sm:col-span-1 font-semibold text-right">Holg.</div>
                 </div>
+
                 {gantt.tasks.map((t) => (
-                  <div key={t.key} className="px-3 py-2 border-t grid grid-cols-12 gap-2 items-center">
-                    <div className="col-span-5">
-                      <div className="text-sm font-semibold text-navy-900">
-                        {t.name}
-                        {t.isCritical ? (
-                          <span className="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-red-100 text-red-700">CRÍTICO</span>
-                        ) : null}
+                  <div key={t.key} className="px-3 py-2 border-t">
+                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 sm:items-center">
+                      <div className="sm:col-span-5 min-w-0">
+                        <div className="text-sm font-semibold text-navy-900 break-words leading-snug">
+                          {t.name}
+                          {t.isCritical ? (
+                            <span className="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-red-100 text-red-700">CRÍTICO</span>
+                          ) : null}
+                        </div>
+                        <div className="text-[11px] text-gray-500 break-words">{t.qty ? `${Math.round(t.qty * 1000) / 1000} ${t.unit}` : t.unit}</div>
+                        <div className="mt-2 h-2 bg-gray-100 rounded relative overflow-hidden">
+                          <div
+                            className={
+                              (t.isCritical ? 'absolute top-0 h-2 bg-navy-900 rounded ' : 'absolute top-0 h-2 bg-mustard-500 rounded ') +
+                              leftPctClass(t.barLeftPct) +
+                              ' ' +
+                              widthPctClass(t.barWidthPct)
+                            }
+                          />
+                        </div>
+
+                        <div className="sm:hidden mt-2 grid grid-cols-2 gap-2 text-xs text-gray-700">
+                          <div><span className="font-semibold">Duración:</span> {t.durationDays} día(s)</div>
+                          <div className="text-right"><span className="font-semibold">Holg.:</span> {t.slackDays}</div>
+                          <div><span className="font-semibold">Inicio:</span> {t.start}</div>
+                          <div className="text-right"><span className="font-semibold">Fin:</span> {t.end}</div>
+                        </div>
                       </div>
-                      <div className="text-[11px] text-gray-500">{t.qty ? `${Math.round(t.qty * 1000) / 1000} ${t.unit}` : t.unit}</div>
-                      <div className="mt-2 h-2 bg-gray-100 rounded relative overflow-hidden">
-                        <div
-                          className={
-                            (t.isCritical ? 'absolute top-0 h-2 bg-navy-900 rounded ' : 'absolute top-0 h-2 bg-mustard-500 rounded ') +
-                            leftPctClass(t.barLeftPct) +
-                            ' ' +
-                            widthPctClass(t.barWidthPct)
-                          }
-                        />
-                      </div>
+
+                      <div className="hidden sm:block sm:col-span-2 text-sm text-gray-700">{t.durationDays} día(s)</div>
+                      <div className="hidden sm:block sm:col-span-2 text-sm text-gray-700">{t.start}</div>
+                      <div className="hidden sm:block sm:col-span-2 text-sm text-gray-700">{t.end}</div>
+                      <div className="hidden sm:block sm:col-span-1 text-sm text-gray-700 text-right">{t.slackDays}</div>
                     </div>
-                    <div className="col-span-2 text-sm text-gray-700">{t.durationDays} día(s)</div>
-                    <div className="col-span-2 text-sm text-gray-700">{t.start}</div>
-                    <div className="col-span-2 text-sm text-gray-700">{t.end}</div>
-                    <div className="col-span-1 text-sm text-gray-700 text-right">{t.slackDays}</div>
                   </div>
                 ))}
               </div>

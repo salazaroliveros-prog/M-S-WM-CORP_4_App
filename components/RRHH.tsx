@@ -1701,27 +1701,27 @@ const RRHH: React.FC<Props> = ({
   }, [payrollPreviewRows]);
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50">
+    <div className="flex flex-col items-center justify-start min-h-screen bg-gray-50 px-3 sm:px-6 py-6">
       <h1 className="text-2xl font-bold mb-4">RRHH M&S</h1>
 
-      <div className="w-full max-w-4xl flex gap-2 mb-6">
+      <div className="w-full max-w-4xl flex flex-col sm:flex-row gap-2 mb-6">
         <button
           type="button"
-          className={activeTab === 'CONTRATOS' ? 'btn-primary' : 'btn-secondary'}
+          className={(activeTab === 'CONTRATOS' ? 'btn-primary' : 'btn-secondary') + ' w-full sm:w-auto'}
           onClick={() => setActiveTab('CONTRATOS')}
         >
           Contratos
         </button>
         <button
           type="button"
-          className={activeTab === 'ASISTENCIA' ? 'btn-primary' : 'btn-secondary'}
+          className={(activeTab === 'ASISTENCIA' ? 'btn-primary' : 'btn-secondary') + ' w-full sm:w-auto'}
           onClick={() => setActiveTab('ASISTENCIA')}
         >
           Asistencia
         </button>
         <button
           type="button"
-          className={activeTab === 'PLANILLA' ? 'btn-primary' : 'btn-secondary'}
+          className={(activeTab === 'PLANILLA' ? 'btn-primary' : 'btn-secondary') + ' w-full sm:w-auto'}
           onClick={() => setActiveTab('PLANILLA')}
         >
           Planilla
@@ -1733,16 +1733,16 @@ const RRHH: React.FC<Props> = ({
           <div className="bg-white rounded shadow p-4">
             <h2 className="font-bold mb-3 flex items-center gap-2"><FileText size={18} /> Generar contrato</h2>
             <div className="flex flex-wrap gap-2">
-              <input value={contractName} onChange={(e) => setContractName(e.target.value)} className="input input-bordered" placeholder="Nombre" />
-              <input value={contractDpi} onChange={(e) => setContractDpi(e.target.value)} className="input input-bordered" placeholder="DPI" />
-              <input value={contractPhone} onChange={(e) => setContractPhone(e.target.value)} className="input input-bordered" placeholder="Teléfono" />
-              <select value={contractRole} onChange={(e) => setContractRole(e.target.value)} className="input input-bordered" aria-label="Puesto" title="Puesto">
+              <input value={contractName} onChange={(e) => setContractName(e.target.value)} className="input input-bordered w-full sm:w-auto" placeholder="Nombre" />
+              <input value={contractDpi} onChange={(e) => setContractDpi(e.target.value)} className="input input-bordered w-full sm:w-auto" placeholder="DPI" />
+              <input value={contractPhone} onChange={(e) => setContractPhone(e.target.value)} className="input input-bordered w-full sm:w-auto" placeholder="Teléfono" />
+              <select value={contractRole} onChange={(e) => setContractRole(e.target.value)} className="input input-bordered w-full sm:w-auto" aria-label="Puesto" title="Puesto">
                 <option value="">Puesto</option>
                 {Object.keys(PAY_RATES).map((k) => (
                   <option key={k} value={k}>{k}</option>
                 ))}
               </select>
-              <select value={contractProjectId} onChange={(e) => setContractProjectId(e.target.value)} className="input input-bordered" aria-label="Proyecto" title="Proyecto">
+              <select value={contractProjectId} onChange={(e) => setContractProjectId(e.target.value)} className="input input-bordered w-full sm:w-auto" aria-label="Proyecto" title="Proyecto">
                 <option value="">Proyecto</option>
                 {projects.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
@@ -1752,19 +1752,19 @@ const RRHH: React.FC<Props> = ({
                 type="number"
                 value={contractDailyRate}
                 onChange={(e) => setContractDailyRate(Number(e.target.value))}
-                className="input input-bordered w-32"
+                className="input input-bordered w-full sm:w-32"
                 placeholder="Q/día"
                 title="Salario diario"
               />
-              <button type="button" className="btn-primary" onClick={handleSendContractLink}>Enviar link</button>
+              <button type="button" className="btn-primary w-full sm:w-auto" onClick={handleSendContractLink}>Enviar link</button>
             </div>
 
             {contractLink && (
               <div className="mt-3">
                 <div className="text-sm mb-2 break-all">{contractLink}</div>
-                <div className="flex gap-2">
-                  <button type="button" className="btn-secondary" onClick={handleCopyContractLink}><Copy size={16} /> Copiar</button>
-                  <button type="button" className="btn-primary" onClick={handleWhatsAppContractLink}><Send size={16} /> WhatsApp</button>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <button type="button" className="btn-secondary w-full sm:w-auto" onClick={handleCopyContractLink}><Copy size={16} /> Copiar</button>
+                  <button type="button" className="btn-primary w-full sm:w-auto" onClick={handleWhatsAppContractLink}><Send size={16} /> WhatsApp</button>
                 </div>
               </div>
             )}
@@ -1773,107 +1773,111 @@ const RRHH: React.FC<Props> = ({
           <div className="bg-white rounded shadow p-4">
             <h2 className="font-bold mb-3">Importar respuesta de contrato (código)</h2>
             {renderSignatureAndSelfie()}
-            <div className="flex flex-wrap gap-2 items-center">
+            <div className="flex flex-col sm:flex-row flex-wrap gap-2 items-stretch sm:items-center">
               <input
                 value={contractImportCode}
                 onChange={(e) => setContractImportCode(e.target.value)}
-                className="input input-bordered flex-1"
+                className="input input-bordered w-full sm:flex-1 min-w-0"
                 placeholder="Pega el CÓDIGO DE RESPUESTA"
               />
-              <button type="button" className="btn-primary" onClick={handleImportContract}>Importar</button>
+              <button type="button" className="btn-primary w-full sm:w-auto" onClick={handleImportContract}>Importar</button>
             </div>
           </div>
 
           <div className="bg-white rounded shadow p-4">
             <h2 className="font-bold mb-3">Contratos</h2>
-            <table className="table-auto w-full text-xs">
-              <thead>
-                <tr>
-                  <th>Empleado</th>
-                  <th>Puesto</th>
-                  <th>Proyecto</th>
-                  <th>Estado</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {contracts.map((c) => (
-                  <tr
-                    key={c.requestId}
-                    className={
-                      c.status !== 'received'
-                        ? ''
-                        : c.response?.accepted === true
-                          ? 'bg-green-50'
-                          : c.response?.accepted === false
-                            ? 'bg-red-50'
-                            : 'bg-green-50'
-                    }
-                  >
-                    <td>{c.seed.employeeName}</td>
-                    <td>{c.seed.role}</td>
-                    <td>{c.seed.projectName || '—'}</td>
-                    <td>
-                      {c.status === 'received'
-                        ? (c.response?.accepted === true ? 'Aceptado' : c.response?.accepted === false ? 'Rechazado' : 'Recibido')
-                        : 'Enviado'}
-                    </td>
-                    <td className="whitespace-nowrap">
-                      <button type="button" className="btn-secondary btn-xs mr-1" onClick={() => printContract(c)}>Imprimir</button>
-                      <button type="button" className="btn-secondary btn-xs" onClick={() => downloadContractPdf(c)}>PDF</button>
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="table-auto w-full text-xs">
+                <thead>
+                  <tr>
+                    <th>Empleado</th>
+                    <th>Puesto</th>
+                    <th>Proyecto</th>
+                    <th>Estado</th>
+                    <th></th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {contracts.map((c) => (
+                    <tr
+                      key={c.requestId}
+                      className={
+                        c.status !== 'received'
+                          ? ''
+                          : c.response?.accepted === true
+                            ? 'bg-green-50'
+                            : c.response?.accepted === false
+                              ? 'bg-red-50'
+                              : 'bg-green-50'
+                      }
+                    >
+                      <td className="break-words">{c.seed.employeeName}</td>
+                      <td className="break-words">{c.seed.role}</td>
+                      <td className="break-words">{c.seed.projectName || '—'}</td>
+                      <td>
+                        {c.status === 'received'
+                          ? (c.response?.accepted === true ? 'Aceptado' : c.response?.accepted === false ? 'Rechazado' : 'Recibido')
+                          : 'Enviado'}
+                      </td>
+                      <td className="whitespace-nowrap">
+                        <button type="button" className="btn-secondary btn-xs mr-1" onClick={() => printContract(c)}>Imprimir</button>
+                        <button type="button" className="btn-secondary btn-xs" onClick={() => downloadContractPdf(c)}>PDF</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           <div className="bg-white rounded shadow p-4">
             <h2 className="font-bold mb-3">Empleados (links de asistencia)</h2>
-            <table className="table-auto w-full text-xs">
-              <thead>
-                <tr>
-                  <th>Empleado</th>
-                  <th>Puesto</th>
-                  <th>Teléfono</th>
-                  <th>Q/día</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {employeesWithOverrides.map((e) => {
-                  const canSendLink = Boolean(onSetAttendanceToken) && acceptedEmployeeIds.has(e.id);
-                  return (
-                    <tr key={e.id}>
-                      <td>{e.name}</td>
-                      <td>{String(e.position ?? '')}</td>
-                      <td>{e.phone || '—'}</td>
-                      <td>
-                        <input
-                          type="number"
-                          className="input input-bordered w-28"
-                          value={employeeRateOverrides[e.id] ?? ''}
-                          placeholder={String(e.dailyRate ?? '')}
-                          onChange={(ev) => handleUpdateEmployeeRate(e.id, Number(ev.target.value))}
-                          title="Override salario diario"
-                        />
-                      </td>
-                      <td className="whitespace-nowrap">
-                        <button
-                          type="button"
-                          className={canSendLink ? 'btn-primary btn-xs' : 'btn-secondary btn-xs'}
-                          disabled={!canSendLink}
-                          title={!onSetAttendanceToken ? 'Supabase no configurado' : (!acceptedEmployeeIds.has(e.id) ? 'Requiere contrato aceptado (recibido)' : '')}
-                          onClick={() => handleGenerateWorkerLink(e.id, e.phone || null)}
-                        >
-                          Enviar link
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="table-auto w-full text-xs">
+                <thead>
+                  <tr>
+                    <th>Empleado</th>
+                    <th>Puesto</th>
+                    <th>Teléfono</th>
+                    <th>Q/día</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {employeesWithOverrides.map((e) => {
+                    const canSendLink = Boolean(onSetAttendanceToken) && acceptedEmployeeIds.has(e.id);
+                    return (
+                      <tr key={e.id}>
+                        <td className="break-words">{e.name}</td>
+                        <td className="break-words">{String(e.position ?? '')}</td>
+                        <td className="break-words">{e.phone || '—'}</td>
+                        <td>
+                          <input
+                            type="number"
+                            className="input input-bordered w-28"
+                            value={employeeRateOverrides[e.id] ?? ''}
+                            placeholder={String(e.dailyRate ?? '')}
+                            onChange={(ev) => handleUpdateEmployeeRate(e.id, Number(ev.target.value))}
+                            title="Override salario diario"
+                          />
+                        </td>
+                        <td className="whitespace-nowrap">
+                          <button
+                            type="button"
+                            className={canSendLink ? 'btn-primary btn-xs' : 'btn-secondary btn-xs'}
+                            disabled={!canSendLink}
+                            title={!onSetAttendanceToken ? 'Supabase no configurado' : (!acceptedEmployeeIds.has(e.id) ? 'Requiere contrato aceptado (recibido)' : '')}
+                            onClick={() => handleGenerateWorkerLink(e.id, e.phone || null)}
+                          >
+                            Enviar link
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
             {!onSetAttendanceToken && (
               <div className="text-xs text-gray-500 mt-2">Nota: para generar links, configure Supabase (RPC set_employee_attendance_token).</div>
             )}
@@ -1950,25 +1954,27 @@ const RRHH: React.FC<Props> = ({
                 <input type="number" step="any" value={newAttendance.location_lng} onChange={e => setNewAttendance(a => ({ ...a, location_lng: e.target.value }))} className="input input-bordered w-24" placeholder="Lng" />
                 <button type="button" className="btn-primary" onClick={handleSaveAttendance}>Agregar</button>
               </div>
-              <table className="table-auto w-full text-xs">
-                <thead><tr><th>Empleado</th><th>Fecha</th><th>Check-in</th><th>Check-out</th><th>Lat</th><th>Lng</th><th></th></tr></thead>
-                <tbody>
-                  {attendanceRows.map(a => (
-                    <tr key={a.id} className={editingAttendance && editingAttendance.id === a.id ? 'bg-yellow-100' : ''}>
-                      <td>{employees.find(e => e.id === a.employee_id)?.name || a.employee_id}</td>
-                      <td>{a.work_date || a.date}</td>
-                      <td>{a.check_in || a.checkIn || ''}</td>
-                      <td>{a.check_out || a.checkOut || ''}</td>
-                      <td>{a.location_lat || ''}</td>
-                      <td>{a.location_lng || ''}</td>
-                      <td>
-                        <button type="button" className="btn-secondary btn-xs mr-1" onClick={() => setEditingAttendance({ ...a })}>Editar</button>
-                        <button type="button" className="btn-error btn-xs" onClick={() => handleDeleteAttendance(a.id)}>Eliminar</button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div className="overflow-x-auto">
+                <table className="table-auto w-full text-xs">
+                  <thead><tr><th>Empleado</th><th>Fecha</th><th>Check-in</th><th>Check-out</th><th>Lat</th><th>Lng</th><th></th></tr></thead>
+                  <tbody>
+                    {attendanceRows.map(a => (
+                      <tr key={a.id} className={editingAttendance && editingAttendance.id === a.id ? 'bg-yellow-100' : ''}>
+                        <td className="break-words">{employees.find(e => e.id === a.employee_id)?.name || a.employee_id}</td>
+                        <td>{a.work_date || a.date}</td>
+                        <td>{a.check_in || a.checkIn || ''}</td>
+                        <td>{a.check_out || a.checkOut || ''}</td>
+                        <td>{a.location_lat || ''}</td>
+                        <td>{a.location_lng || ''}</td>
+                        <td className="whitespace-nowrap">
+                          <button type="button" className="btn-secondary btn-xs mr-1" onClick={() => setEditingAttendance({ ...a })}>Editar</button>
+                          <button type="button" className="btn-error btn-xs" onClick={() => handleDeleteAttendance(a.id)}>Eliminar</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
               {editingAttendance && (
                 <div className="flex gap-2 mt-2 flex-wrap">
                   <input type="time" value={editingAttendance.check_in || ''} onChange={e => setEditingAttendance(a => ({ ...a, check_in: e.target.value }))} className="input input-bordered" placeholder="Check-in" />
@@ -2009,36 +2015,38 @@ const RRHH: React.FC<Props> = ({
 
               <div className="bg-white rounded shadow p-4">
                 <h2 className="font-bold mb-3">Resumen</h2>
-                <table className="table-auto w-full text-xs">
-                  <thead>
-                    <tr>
-                      <th>Empleado</th>
-                      <th>Puesto</th>
-                      <th>Proyecto</th>
-                      <th>Días</th>
-                      <th>Min. trabajados</th>
-                      <th>Q/día</th>
-                      <th>Total (Q)</th>
-                      <th>Descuento (Q)</th>
-                      <th>Min. fuera</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {payrollPreviewRows.map((r) => (
-                      <tr key={r.employeeId}>
-                        <td>{r.employee}</td>
-                        <td>{r.position}</td>
-                        <td>{r.projectName || '—'}</td>
-                        <td className="text-center">{r.daysWorked}</td>
-                        <td className="text-right">{r.minutesWorked}</td>
-                        <td className="text-right">{(Math.round(r.dailyRate * 100) / 100).toFixed(2)}</td>
-                        <td className="text-right">{(Math.round(r.total * 100) / 100).toFixed(2)}</td>
-                        <td className="text-right">{(Math.round(r.discount * 100) / 100).toFixed(2)}</td>
-                        <td className="text-right">{r.minutesOutside}</td>
+                <div className="overflow-x-auto">
+                  <table className="table-auto w-full text-xs">
+                    <thead>
+                      <tr>
+                        <th>Empleado</th>
+                        <th>Puesto</th>
+                        <th>Proyecto</th>
+                        <th>Días</th>
+                        <th>Min. trabajados</th>
+                        <th>Q/día</th>
+                        <th>Total (Q)</th>
+                        <th>Descuento (Q)</th>
+                        <th>Min. fuera</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {payrollPreviewRows.map((r) => (
+                        <tr key={r.employeeId}>
+                          <td className="break-words">{r.employee}</td>
+                          <td className="break-words">{r.position}</td>
+                          <td className="break-words">{r.projectName || '—'}</td>
+                          <td className="text-center">{r.daysWorked}</td>
+                          <td className="text-right">{r.minutesWorked}</td>
+                          <td className="text-right">{(Math.round(r.dailyRate * 100) / 100).toFixed(2)}</td>
+                          <td className="text-right">{(Math.round(r.total * 100) / 100).toFixed(2)}</td>
+                          <td className="text-right">{(Math.round(r.discount * 100) / 100).toFixed(2)}</td>
+                          <td className="text-right">{r.minutesOutside}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
                 <div className="mt-3 font-bold">TOTAL GENERAL: Q{(Math.round(payrollGrandTotal * 100) / 100).toFixed(2)}</div>
               </div>
             </>

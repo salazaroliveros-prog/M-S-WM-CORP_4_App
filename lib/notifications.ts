@@ -29,8 +29,9 @@ export async function createNotification(input: {
         data: { type: input.type },
       },
     });
-  } catch {
-    // ignore
+  } catch (e) {
+    // Best-effort: keep UX unchanged, but log for diagnostics.
+    console.warn('[push] invoke failed (createNotification)', e);
   }
 }
 
@@ -57,8 +58,8 @@ export async function notifyAttendance(orgId: string, employeeId: string, messag
         data: { type: 'asistencia' },
       },
     });
-  } catch {
-    // ignore
+  } catch (e) {
+    console.warn('[push] invoke failed (notifyAttendance)', e);
   }
 }
 

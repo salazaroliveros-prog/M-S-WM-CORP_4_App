@@ -88,8 +88,10 @@ Pasos (resumen):
 1) Generar VAPID keys (ejemplo con Node):
 `npx web-push generate-vapid-keys`
 
-2) En el **frontend** (build time), definir la public key:
+2) En el **frontend** (build time), definir la public key (opcional si la función `push` está desplegada):
 - `VITE_WEB_PUSH_PUBLIC_KEY=<PUBLIC_KEY>`
+
+Si no defines `VITE_WEB_PUSH_PUBLIC_KEY`, la app intenta obtener la public key en runtime desde la Edge Function `push` (requiere sesión iniciada).
 
 3) En Supabase (secrets/variables de funciones), definir:
 - `WEB_PUSH_VAPID_PUBLIC_KEY=<PUBLIC_KEY>`
@@ -98,6 +100,7 @@ Pasos (resumen):
 
 4) Aplicar migración SQL:
 - Ejecuta la migración [supabase/migrations/2026022301_push_subscriptions.sql](supabase/migrations/2026022301_push_subscriptions.sql)
+- Recomendado: aplica también [supabase/migrations/2026022401_push_subscriptions_upsert_fix.sql](supabase/migrations/2026022401_push_subscriptions_upsert_fix.sql) para que el `upsert` no falle si el endpoint quedó asociado a otro usuario (dispositivo compartido / re-login).
 
 5) Desplegar la función `push` en Supabase:
 - `supabase functions deploy push`
