@@ -46,6 +46,12 @@ const WorkerAttendance: React.FC = () => {
     return m?.[1] ? decodeURIComponent(m[1]) : '';
   };
 
+  const parseCodeFromHash = () => {
+    const raw = window.location.hash || '';
+    const m = raw.match(/[&#]code=([^&]+)/);
+    return m?.[1] ? decodeURIComponent(m[1]) : '';
+  };
+
   const [token, setToken] = useState<string>(() => {
     const fromHash = parseTokenFromHash();
     if (fromHash) return fromHash;
@@ -66,6 +72,11 @@ const WorkerAttendance: React.FC = () => {
     } catch {
       // ignore
     }
+
+    const codeFromHash = parseCodeFromHash();
+    if (codeFromHash) {
+      setBiometricCode(codeFromHash);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -82,7 +93,13 @@ const WorkerAttendance: React.FC = () => {
   const [biometricMode, setBiometricMode] = useState<'phone' | 'code'>(() => {
     return (typeof window !== 'undefined' && (window as any).isSecureContext && typeof PublicKeyCredential !== 'undefined') ? 'phone' : 'code';
   });
-  const [biometricCode, setBiometricCode] = useState('');
+  const [biometricCode, setBiometricCode] = useState<string>(() => {
+    try {
+      return parseCodeFromHash();
+    } catch {
+      return '';
+    }
+  });
   const [employeeName, setEmployeeName] = useState<string>('');
   const [webauthnStatus, setWebauthnStatus] = useState<{ credentialCount: number; rpId: string } | null>(null);
   const [webauthnBusy, setWebauthnBusy] = useState(false);

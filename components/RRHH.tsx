@@ -855,13 +855,14 @@ const RRHH: React.FC<Props> = ({
       return;
     }
     const token = randomToken();
+    const verificationCode = String(Math.floor(1000 + Math.random() * 9000));
     try {
       await onSetAttendanceToken(employeeId, token);
     } catch (e: any) {
       alert(e?.message || 'No se pudo generar el token de asistencia');
       return;
     }
-    const url = `${window.location.origin}${window.location.pathname}#asistencia=${encodeURIComponent(token)}`;
+    const url = `${window.location.origin}${window.location.pathname}#asistencia=${encodeURIComponent(token)}&code=${encodeURIComponent(verificationCode)}`;
     try {
       await navigator.clipboard.writeText(url);
     } catch {
@@ -875,6 +876,9 @@ const RRHH: React.FC<Props> = ({
         '',
         'Abre este link para marcar tu entrada/salida con GPS:',
         url,
+        '',
+        `Código de verificación: ${verificationCode}`,
+        '(Si la app te lo pide, el código ya va en el link; solo confirma o pégalo.)',
         '',
         'IMPORTANTE:',
         '- Debes permitir ubicación (GPS).',
