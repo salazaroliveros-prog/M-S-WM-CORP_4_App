@@ -758,6 +758,10 @@ const App: React.FC = () => {
   const [cloudAuthError, setCloudAuthError] = useState<string | null>(null);
   const [usedAutoLogin, setUsedAutoLogin] = useState(false);
 
+  // Build-time envs
+  const metaEnv = ((import.meta as any).env ?? {}) as Record<string, any>;
+  const showCloudLoginUI = String(metaEnv.VITE_ENABLE_CLOUD_LOGIN || '').trim().toLowerCase() === 'true';
+
   const [syncVersion, setSyncVersion] = useState(0);
   const realtimeChannelRef = useRef<any>(null);
   const realtimeBumpTimerRef = useRef<number | null>(null);
@@ -789,6 +793,52 @@ const App: React.FC = () => {
     } catch {
       // ignore
     }
+  }, []);
+
+  // Auto-initialize Supabase cloud when VITE_SUPABASE_URL + ANON_KEY are present.
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    // set that we attempted cloud so UI shows appropriate status badges
+    setCloudLoginAttempted(true);
+
+    let cancelled = false;
+    const initCloud = async () => {
+      try {
+        // Prefer existing session
+        try {
+          const sess = await getSupabaseClient().auth.getSession();
+          if (sess.data.session?.access_token) {
+            const resolvedOrgId = await resolveCloudOrgId('M&S Construcción');
+            if (!cancelled) await startCloudForOrg(resolvedOrgId);
+            return;
+          }
+        } catch {
+          // ignore
+        }
+
+        // Try anonymous sign-in; may fail if signups are disabled.
+        try {
+          await ensureSupabaseAnonymousSession();
+          const resolvedOrgId = await resolveCloudOrgId('M&S Construcción');
+          if (!cancelled) await startCloudForOrg(resolvedOrgId);
+        } catch (e: any) {
+          // Do not open UI prompts automatically. Log and set a non-blocking error.
+          console.warn('Automatic anonymous sign-in failed:', e?.message || e);
+          if (!cancelled) {
+            setCloudError(String(e?.message || 'Automatic anonymous sign-in failed'));
+            // keep cloudNeedsAuth=false to avoid showing login form automatically
+            setCloudNeedsAuth(false);
+          }
+        }
+      } catch (e) {
+        console.error('Error during cloud initialization', e);
+      }
+    };
+
+    void initCloud();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Save to LocalStorage
@@ -2601,7 +2651,7 @@ const App: React.FC = () => {
         <div className="p-4 md:p-8 max-w-7xl mx-auto h-full">
           {(() => {
             const needsAuthByError = cloudError ? isAnonymousAuthDisabledError({ message: cloudError }) : false;
-            const showCloudAuth = isSupabaseConfigured && cloudLoginAttempted && !orgId && (cloudNeedsAuth || needsAuthByError);
+            const showCloudAuth = showCloudLoginUI && isSupabaseConfigured && cloudLoginAttempted && !orgId && (cloudNeedsAuth || needsAuthByError);
             const showCloudError = Boolean(cloudError) && !needsAuthByError;
 
             return (
