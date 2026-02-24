@@ -16,6 +16,11 @@ dist-ssr
 .env.test
 .env.test.*
 
+# Local env files (may contain Supabase anon keys) - do not commit
+.env.local
+.env.local.*
+.env.*
+
 # Supabase local temp artifacts
 supabase/.temp/
 
