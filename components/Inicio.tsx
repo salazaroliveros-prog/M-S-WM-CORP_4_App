@@ -1,45 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabaseClient';
+import { Project, Transaction, ViewState } from '../types';
+import { Save, DollarSign, CreditCard } from 'lucide-react';
 
-const Inicio: React.FC<Props> = ({ projects, onViewChange, onCreateTransaction }) => {
-  // --- Realtime Supabase: actualizar automáticamente si hay cambios en transacciones ---
-  useEffect(() => {
-    let channel: any = null;
-    let mounted = true;
-    const setupRealtime = async () => {
-      if (!isSupabaseConfigured) return;
-      try {
-        const supabase = getSupabaseClient();
-        channel = supabase
-          .channel('transactions-realtime')
-          .on(
-            'postgres_changes',
-            { event: '*', schema: 'public', table: 'transactions' },
-            (payload: any) => {
-              if (!mounted) return;
-              // Aquí podrías recargar la lista de transacciones o refrescar la UI según tu lógica
-              // Por simplicidad, solo recargamos la página (puedes mejorar esto)
-              window.location.reload();
-            }
-          )
-          .subscribe();
-      } catch {
-        // ignore
-      }
-    };
-    setupRealtime();
-    return () => {
-      mounted = false;
-      if (channel) {
-        try {
-          const supabase = getSupabaseClient();
-          supabase.removeChannel(channel);
-        } catch {
-          // ignore
-        }
-      }
-    };
-  }, []);
+interface Props {
+  projects: Project[];
+  onViewChange: (view: ViewState) => void;
+  onCreateTransaction?: (tx: Transaction) => Promise<void>;
+}
 
   // ...rest of the component code...
 
@@ -47,8 +15,6 @@ const Inicio: React.FC<Props> = ({ projects, onViewChange, onCreateTransaction }
     // ...JSX...
   );
 };
-
-export default Inicio;
 import { Project, Transaction, ViewState } from '../types';
 import { Save, DollarSign, CreditCard } from 'lucide-react';
 
