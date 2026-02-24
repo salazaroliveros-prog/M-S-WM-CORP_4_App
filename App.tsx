@@ -2605,6 +2605,7 @@ const App: React.FC = () => {
                 projects={projects}
                 syncVersion={syncVersion}
                 isAdmin={isSupabaseConfigured && !!orgId}
+                orgId={orgId}
                 onListEmployees={handleListEmployees}
                 onCreateEmployee={handleCreateEmployee}
                 onListContracts={handleListContracts}

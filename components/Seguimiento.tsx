@@ -25,6 +25,8 @@ import {
   toIsoDateKey,
   workingDaysBetweenInclusive,
 } from '../lib/calendar';
+import { loadOfflineCatalog } from '../lib/offlineCatalog';
+import { computeCpm, type CpmTaskInput } from '../lib/ganttCpm';
 
 interface Props {
   projects: Project[];
@@ -185,6 +187,7 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [budgetLines, setBudgetLines] = useState<BudgetLine[]>([]);
   const [budgetIndirectPct, setBudgetIndirectPct] = useState<string>('0');
+  const [apuMetaByNameNorm, setApuMetaByNameNorm] = useState<Record<string, any>>({});
   const [progressLines, setProgressLines] = useState<ProgressLineState[]>([]);
   const [isDirty, setIsDirty] = useState(false);
   const [status, setStatus] = useState<ProgressStatus>(null);
@@ -267,6 +270,132 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
       .replace(/\s+/g, ' ')
       .trim();
   };
+
+  const parseNumberFromText = (v: any): number | null => {
+    const s = String(v ?? '').replace(',', '.');
+    const m = s.match(/(-?\d+(?:\.\d+)?)/);
+    if (!m) return null;
+    const n = Number(m[1]);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const estimateDurationDaysFromApuMeta = (qty: number, meta: any): number | null => {
+    if (!meta) return null;
+    const raw = meta.rendimiento_mo ?? meta.rendimientoMO ?? meta.rendimientoMo ?? null;
+    if (!raw) return null;
+
+    // Accept formats like:
+    // - "0.08 jornales/m2" (jornales per unit)
+    // - "12 m2/jornal" (units per jornal)
+    const s = String(raw).toLowerCase().replace(/\s+/g, ' ').trim();
+    const n = parseNumberFromText(s);
+    if (n == null || !Number.isFinite(qty) || qty <= 0) return null;
+
+    let jornalesPerUnit: number | null = null;
+    const isUnitsPerJornal = /\/(\s*)jorn/.test(s) && !/jorn\w*\s*\//.test(s);
+    const isJornalesPerUnit = /jorn\w*\s*\//.test(s);
+    if (isUnitsPerJornal) {
+      if (n > 0) jornalesPerUnit = 1 / n;
+    } else if (isJornalesPerUnit) {
+      jornalesPerUnit = Math.max(0, n);
+    }
+
+    if (jornalesPerUnit == null || !Number.isFinite(jornalesPerUnit) || jornalesPerUnit <= 0) return null;
+
+    const crewRaw = meta.cuadrilla ?? meta.crew_size ?? meta.crewSize ?? meta.cantidad_personas ?? meta.personas ?? null;
+    const crewN = parseNumberFromText(crewRaw);
+    const crewSize = Math.max(1, Math.trunc(crewN && crewN > 0 ? crewN : 1));
+
+    const totalJornales = jornalesPerUnit * qty;
+    if (!Number.isFinite(totalJornales) || totalJornales <= 0) return null;
+    return Math.max(1, Math.ceil(totalJornales / crewSize));
+  };
+
+  const parseDepsFromApuMeta = (meta: any): string[] => {
+    if (!meta) return [];
+    const raw = meta.deps ?? meta.depends_on ?? meta.dependsOn ?? meta.predecessors ?? null;
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw.map((x) => normalizeKey(String(x ?? ''))).filter(Boolean);
+    const s = String(raw);
+    return s
+      .split(/\||,|;|\n/)
+      .map((x) => normalizeKey(x))
+      .filter(Boolean);
+  };
+
+  useEffect(() => {
+    // Load APU meta for the currently selected project's typology and budget lines.
+    if (!selectedProject) {
+      setApuMetaByNameNorm({});
+      return;
+    }
+    const typology = String(selectedProject.typology || '').trim().toUpperCase();
+    if (!typology) {
+      setApuMetaByNameNorm({});
+      return;
+    }
+    const lineNameNorms = Array.from(
+      new Set(
+        (budgetLines ?? [])
+          .map((l) => normalizeKey(l?.name || ''))
+          .filter(Boolean)
+      )
+    );
+    if (lineNameNorms.length === 0) {
+      setApuMetaByNameNorm({});
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      const merged: Record<string, any> = {};
+
+      // Offline catalog (works even without cloud)
+      try {
+        const catalog = await loadOfflineCatalog();
+        for (const t of catalog.apuTemplates ?? []) {
+          if (String(t?.typology || '').trim().toUpperCase() !== typology) continue;
+          const k = normalizeKey(String(t?.nameNorm ?? t?.name ?? ''));
+          if (!k) continue;
+          if (lineNameNorms.includes(k) && t?.meta) merged[k] = t.meta;
+        }
+      } catch {
+        // ignore
+      }
+
+      // Cloud meta (authoritative if available)
+      if (useCloud && orgId && isSupabaseConfigured()) {
+        try {
+          const supabase = getSupabaseClient();
+          const chunkSize = 100;
+          for (let i = 0; i < lineNameNorms.length; i += chunkSize) {
+            const chunk = lineNameNorms.slice(i, i + chunkSize);
+            const res = await supabase
+              .from('apu_templates')
+              .select('name_norm, meta')
+              .eq('org_id', orgId)
+              .eq('typology', typology)
+              .in('name_norm', chunk);
+            if (res.error) throw res.error;
+            for (const row of res.data ?? []) {
+              const k = normalizeKey(String((row as any)?.name_norm ?? ''));
+              if (!k) continue;
+              if ((row as any)?.meta) merged[k] = (row as any).meta;
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      if (cancelled) return;
+      setApuMetaByNameNorm(merged);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [budgetLines, orgId, selectedProject, useCloud]);
 
   const normalizeMatKey = (name: string, unit: string) => `${normalizeKey(name)}__${normalizeKey(unit || 'Unidad')}`;
 
@@ -914,75 +1043,99 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
 
     const baseStart = parseIsoDateOnly(selectedProject.startDate) ?? new Date();
 
-    // Estimate duration from "labor effort". We only have laborCost (Q/unit), so we treat laborCost*qty as a proxy.
-    // Daily burn is a pragmatic default; can be refined later with crew/productivity models.
+    // Estimate duration from APU yield meta when available; otherwise fallback to a pragmatic labor-effort proxy.
+    // We only have laborCost (Q/unit), so we treat laborCost*qty as effort proxy.
     const DAILY_LABOR_BURN_Q = 1800;
 
-    // Pre-compute rough end year range to build holiday calendar.
-    const years = new Set<number>();
-    years.add(baseStart.getFullYear());
-    years.add(baseStart.getFullYear() + 1);
-    const cal = defaultWorkCalendarForYears(Array.from(years));
-
-    // Sequential dependencies by budget line order (as displayed/saved).
-    const rawTasks = budgetLines.map((bl, idx) => {
+    const raw = budgetLines.map((bl, idx) => {
       const qty = Number(bl.quantity) || 0;
+      const name = String(bl.name || '');
+      const unit = String(bl.unit || '');
+      const nameNorm = normalizeKey(name);
+      const meta = nameNorm ? (apuMetaByNameNorm as any)[nameNorm] : null;
+      const durationFromMeta = estimateDurationDaysFromApuMeta(qty, meta);
+
       const effortQ = Math.max(0, (Number(bl.laborCost) || 0) * Math.max(0, qty));
-      const duration = Math.max(1, Math.round(effortQ > 0 ? effortQ / DAILY_LABOR_BURN_Q : 1));
+      const fallbackDuration = Math.max(1, Math.round(effortQ > 0 ? effortQ / DAILY_LABOR_BURN_Q : 1));
+
+      const durationDays = durationFromMeta ?? fallbackDuration;
+      const depsNameNorm = meta ? parseDepsFromApuMeta(meta) : [];
+
       return {
         idx,
-        key: `${idx}-${String(bl.id || bl.name)}`,
-        name: String(bl.name || ''),
-        unit: String(bl.unit || ''),
+        key: `${idx}-${String(bl.id || nameNorm || bl.name)}`,
+        name,
+        unit,
         qty,
-        durationDays: duration,
+        durationDays,
+        nameNorm,
+        depsNameNorm,
       };
     });
 
-    let cursor = nextWorkingDay(baseStart, cal);
-    const scheduled: Array<Omit<GanttTask, 'slackDays' | 'isCritical' | 'barLeftPct' | 'barWidthPct'>> = [];
-    for (const t of rawTasks) {
-      const start = nextWorkingDay(cursor, cal);
-      const end = addWorkingDaysInclusive(start, t.durationDays, cal);
-      scheduled.push({
+    // If no explicit dependencies exist, fallback to sequential order.
+    const hasAnyExplicitDeps = raw.some((t) => (t.depsNameNorm ?? []).length > 0);
+    const firstKeyByNameNorm = new Map<string, string>();
+    for (const t of raw) {
+      if (t.nameNorm && !firstKeyByNameNorm.has(t.nameNorm)) firstKeyByNameNorm.set(t.nameNorm, t.key);
+    }
+
+    const cpmInputs: CpmTaskInput[] = raw.map((t, i) => {
+      let deps: string[] = [];
+      if (hasAnyExplicitDeps) {
+        deps = (t.depsNameNorm ?? [])
+          .map((dn) => firstKeyByNameNorm.get(dn))
+          .filter((x): x is string => Boolean(x));
+      } else if (i > 0) {
+        deps = [raw[i - 1].key];
+      }
+      return { key: t.key, durationDays: t.durationDays, deps };
+    });
+
+    const cpm = computeCpm(cpmInputs);
+
+    // Build calendar years to cover the schedule horizon.
+    const baseYear = baseStart.getFullYear();
+    const approxYears = Math.max(2, Math.ceil((cpm.projectEnd + 1) / 250) + 1);
+    const years: number[] = [];
+    for (let y = baseYear; y <= baseYear + approxYears; y++) years.push(y);
+    const cal = defaultWorkCalendarForYears(years);
+
+    const projectStartDate = nextWorkingDay(baseStart, cal);
+    const dateAtOffset = (offset: number) => addWorkingDaysInclusive(projectStartDate, Math.max(0, offset) + 1, cal);
+
+    const projectStart = toIsoDateKey(projectStartDate);
+    const projectEnd = toIsoDateKey(dateAtOffset(cpm.projectEnd));
+    const totalWorking = Math.max(1, cpm.projectEnd + 1);
+
+    const tasks: GanttTask[] = raw.map((t) => {
+      const r = cpm.tasks.get(t.key);
+      const es = r?.es ?? 0;
+      const ef = r?.ef ?? Math.max(0, es + Math.max(1, t.durationDays) - 1);
+
+      const start = toIsoDateKey(dateAtOffset(es));
+      const end = toIsoDateKey(dateAtOffset(ef));
+
+      const barLeftPct = Math.max(0, Math.min(100, (es / totalWorking) * 100));
+      const barWidthPct = Math.max(0.5, Math.min(100, (Math.max(1, t.durationDays) / totalWorking) * 100));
+
+      return {
         key: t.key,
         name: t.name,
         unit: t.unit,
         qty: t.qty,
-        durationDays: t.durationDays,
-        start: toIsoDateKey(start),
-        end: toIsoDateKey(end),
-      });
-      cursor = new Date(end);
-      cursor.setDate(cursor.getDate() + 1);
-    }
-
-    const projectStart = scheduled[0]?.start ?? toIsoDateKey(baseStart);
-    const projectEnd = scheduled[scheduled.length - 1]?.end ?? projectStart;
-
-    const startDate = parseIsoDateOnly(projectStart) ?? baseStart;
-    const endDate = parseIsoDateOnly(projectEnd) ?? baseStart;
-    const totalWorking = Math.max(1, workingDaysBetweenInclusive(startDate, endDate, cal));
-
-    // With sequential dependencies, slack is 0 and the critical path includes all tasks.
-    const tasks: GanttTask[] = scheduled.map((t) => {
-      const tStart = parseIsoDateOnly(t.start) ?? startDate;
-      const tEnd = parseIsoDateOnly(t.end) ?? endDate;
-      const left = workingDaysBetweenInclusive(startDate, tStart, cal) - 1;
-      const width = workingDaysBetweenInclusive(tStart, tEnd, cal);
-      const barLeftPct = Math.max(0, Math.min(100, (left / totalWorking) * 100));
-      const barWidthPct = Math.max(0.5, Math.min(100, (width / totalWorking) * 100));
-      return {
-        ...t,
-        slackDays: 0,
-        isCritical: true,
+        durationDays: Math.max(1, Math.trunc(Number(t.durationDays) || 1)),
+        start,
+        end,
+        slackDays: r?.slackDays ?? 0,
+        isCritical: r?.isCritical ?? true,
         barLeftPct,
         barWidthPct,
       };
     });
 
     return { tasks, start: projectStart, end: projectEnd };
-  }, [selectedProjectId, selectedProject, budgetLines]);
+  }, [selectedProjectId, selectedProject, budgetLines, apuMetaByNameNorm]);
 
   const evm = useMemo(() => {
     if (!selectedProjectId) return null;
@@ -2334,7 +2487,7 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
               </div>
 
               <div className="text-xs text-gray-500">
-                Ruta crítica: dependencias secuenciales según el orden del presupuesto (holgura = 0). Para holguras reales se requieren dependencias/actividades paralelas definidas.
+                Ruta crítica y holgura: calculadas por CPM (Critical Path Method). Dependencias: desde APU (meta.deps/depends_on/predecessors) cuando existan; si no hay dependencias definidas, se asume secuencial por orden del presupuesto.
               </div>
             </div>
           )}

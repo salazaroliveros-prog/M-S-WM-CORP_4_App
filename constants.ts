@@ -39,9 +39,9 @@ export const calculateAPU = (directCost: number, customIndirectFactor?: number) 
   return { indirectCost, priceNoTax, tax, finalPrice };
 };
 
-// Mock Database of Construction Items (Renglones) for defaults
-// Lists approx 30 items per typology in chronological order
-export const DEFAULT_BUDGET_LINES: Record<Typology, Partial<BudgetLine>[]> = {
+// Demo/mock catalog of Construction Items (Renglones).
+// Kept for reference, but not used by default in the app.
+export const DEMO_DEFAULT_BUDGET_LINES: Record<Typology, Partial<BudgetLine>[]> = {
   'RESIDENCIAL': [
     { name: '1. Limpieza y chapeo', unit: 'm2', laborCost: 15, equipmentCost: 5, materials: [] },
     { name: '2. Trazo y nivelación', unit: 'm2', laborCost: 12, equipmentCost: 3, materials: [{name: 'Cal', unit: 'lbs', quantityPerUnit: 0.5, unitPrice: 5}, {name: 'Madera reglas', unit: 'pt', quantityPerUnit: 0.5, unitPrice: 12}] },
@@ -203,6 +203,16 @@ export const DEFAULT_BUDGET_LINES: Record<Typology, Partial<BudgetLine>[]> = {
     { name: '29. Aulas provisionales', unit: 'm2', laborCost: 150, equipmentCost: 20, materials: [{name: 'Materiales livianos', unit: 'm2', quantityPerUnit: 1, unitPrice: 600}] },
     { name: '30. Inauguración y entrega', unit: 'global', laborCost: 2000, equipmentCost: 0, materials: [] },
   ]
+};
+
+// Production default: no preloaded "standard" budget lines.
+// Budget lines should be entered by the user (or imported/suggested from real catalogs).
+export const DEFAULT_BUDGET_LINES: Record<Typology, Partial<BudgetLine>[]> = {
+  RESIDENCIAL: [],
+  COMERCIAL: [],
+  INDUSTRIAL: [],
+  CIVIL: [],
+  PUBLICA: [],
 };
 
 // Roof-type packages (APU templates) to be merged into Presupuestos.

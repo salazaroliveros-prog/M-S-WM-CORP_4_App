@@ -16,6 +16,7 @@ import {
   Legend,
 } from 'recharts';
 import { isSupabaseConfigured, getSupabaseClient } from '../lib/supabaseClient';
+import { addDays, parseIsoDateOnly, toIsoDateKey } from '../lib/calendar';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -70,36 +71,53 @@ const Dashboard: React.FC<Props> = ({ projects, useCloud = false, orgId = null, 
   const buildRange = () => {
     const startRaw = String(dateFrom || '').trim();
     const endRaw = String(dateTo || '').trim();
-    const start = startRaw ? new Date(`${startRaw}T00:00:00`) : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-    const end = endRaw ? new Date(`${endRaw}T23:59:59`) : new Date();
-    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    const startLocal = startRaw ? parseIsoDateOnly(startRaw) : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+    // End is exclusive so we include the full selected end day (incl. ms).
+    const endLocal = endRaw ? parseIsoDateOnly(endRaw) : null;
+
+    const start = startLocal ? new Date(startLocal.getFullYear(), startLocal.getMonth(), startLocal.getDate(), 0, 0, 0, 0) : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+    const endExclusive = endLocal
+      ? new Date(addDays(new Date(endLocal.getFullYear(), endLocal.getMonth(), endLocal.getDate(), 0, 0, 0, 0), 1).getTime())
+      : new Date();
+
+    if (Number.isNaN(start.getTime()) || Number.isNaN(endExclusive.getTime())) {
       const now = new Date();
       const rangeStart = new Date(now.getFullYear(), now.getMonth(), 1);
       const rangeEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
       return { startIso: rangeStart.toISOString(), endIso: rangeEnd.toISOString() };
     }
-    const startIso = start.toISOString();
-    const endIso = end.toISOString();
-    return { startIso, endIso };
+    return { startIso: start.toISOString(), endIso: endExclusive.toISOString() };
   };
 
   const computeMetricsFromRows = (rows: TxRow[], range: { start: string; end: string }) => {
     const start = new Date(range.start);
-    const end = new Date(range.end);
-    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    const endExclusive = new Date(range.end);
+    const startT = start.getTime();
+    const endT = endExclusive.getTime();
+    if (Number.isNaN(startT) || Number.isNaN(endT)) {
       setMonthIncome(0);
       setMonthExpense(0);
       setLineData([]);
       return;
     }
 
+    const rowsInRange = rows.filter((r) => {
+      const t = new Date(String(r.occurred_at)).getTime();
+      if (Number.isNaN(t)) return false;
+      return t >= startT && t < endT;
+    });
+
     const monthKeys: { key: string; label: string }[] = [];
     const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
-    const endMonth = new Date(end.getFullYear(), end.getMonth(), 1);
+    const endInclusive = new Date(endExclusive.getTime() - 1);
+    const endMonth = new Date(endInclusive.getFullYear(), endInclusive.getMonth(), 1);
+    const showYear = cursor.getFullYear() !== endMonth.getFullYear();
     while (cursor.getTime() <= endMonth.getTime() && monthKeys.length < 24) {
       const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`;
       const label = cursor.toLocaleString('es', { month: 'short' }).replace('.', '');
-      monthKeys.push({ key, label: label.charAt(0).toUpperCase() + label.slice(1) });
+      const base = label.charAt(0).toUpperCase() + label.slice(1);
+      const finalLabel = showYear ? `${base} ${String(cursor.getFullYear()).slice(-2)}` : base;
+      monthKeys.push({ key, label: finalLabel });
       cursor.setMonth(cursor.getMonth() + 1);
     }
 
@@ -118,7 +136,7 @@ const Dashboard: React.FC<Props> = ({ projects, useCloud = false, orgId = null, 
 
     let totalIncome = 0;
     let totalExpense = 0;
-    for (const r of rows) {
+    for (const r of rowsInRange) {
       const v = Number(r.cost ?? 0) || 0;
       if (String(r.type).toUpperCase() === 'INGRESO') totalIncome += v;
       else totalExpense += v;
@@ -145,7 +163,7 @@ const Dashboard: React.FC<Props> = ({ projects, useCloud = false, orgId = null, 
       if (proj && String(r.project_id) !== proj) return false;
       const t = new Date(String(r.occurred_at)).getTime();
       if (Number.isNaN(t)) return false;
-      return t >= startT && t <= endT;
+      return t >= startT && t < endT;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterProjectId, dateFrom, dateTo, useCloud, orgId]);
@@ -242,7 +260,7 @@ const Dashboard: React.FC<Props> = ({ projects, useCloud = false, orgId = null, 
     for (const r of filteredTxRows) {
       const d = new Date(String(r.occurred_at));
       if (Number.isNaN(d.getTime())) continue;
-      const key = d.toISOString().slice(0, 10);
+      const key = toIsoDateKey(d);
       map.set(key, (map.get(key) ?? 0) + 1);
     }
     const rows = Array.from(map.entries())
@@ -262,7 +280,7 @@ const Dashboard: React.FC<Props> = ({ projects, useCloud = false, orgId = null, 
     for (const r of filteredTxRows) {
       const d = new Date(String(r.occurred_at));
       if (Number.isNaN(d.getTime())) continue;
-      const key = d.toISOString().slice(0, 10);
+      const key = toIsoDateKey(d);
       const b = map.get(key) ?? { ingresos: 0, gastos: 0 };
       const v = Number(r.cost) || 0;
       if (String(r.type).toUpperCase() === 'INGRESO') b.ingresos += v;
@@ -301,6 +319,7 @@ const Dashboard: React.FC<Props> = ({ projects, useCloud = false, orgId = null, 
 
     const counts = new Map<string, number>();
     for (const p of projects) {
+      if (p.status !== 'active') continue;
       const key = labelFor(p.typology);
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
@@ -352,7 +371,7 @@ const Dashboard: React.FC<Props> = ({ projects, useCloud = false, orgId = null, 
       } else {
         const raw = localStorage.getItem('transactions');
         const txs: any[] = raw ? JSON.parse(raw) : [];
-        const rows: TxRow[] = txs.map((t) => ({
+        let rows: TxRow[] = txs.map((t) => ({
           id: String(t.id ?? `${t.type ?? ''}|${t.date ?? ''}|${t.cost ?? t.amount ?? 0}|${t.projectId ?? ''}|${t.description ?? ''}`),
           project_id: String(t.projectId ?? ''),
           type: String(t.type ?? ''),
@@ -361,6 +380,9 @@ const Dashboard: React.FC<Props> = ({ projects, useCloud = false, orgId = null, 
           provider: String(t.provider ?? ''),
           occurred_at: String(t.date ?? ''),
         }));
+
+        if (filterProjectId !== 'all') rows = rows.filter((r) => String(r.project_id) === String(filterProjectId));
+
         txRowsRef.current = rows;
         computeMetricsFromRows(rows, { start: rangeStartIso, end: rangeEndIso });
       }
@@ -400,7 +422,9 @@ const Dashboard: React.FC<Props> = ({ projects, useCloud = false, orgId = null, 
                   const { startIso, endIso } = buildRange();
                   return { start: startIso, end: endIso };
                 })();
-                computeMetricsFromRows(txRowsRef.current, range);
+                const rowsForMetrics =
+                  filterProjectId === 'all' ? txRowsRef.current : txRowsRef.current.filter((r) => String(r.project_id) === String(filterProjectId));
+                computeMetricsFromRows(rowsForMetrics, range);
               }
             } else {
               const row = (payload as any)?.new;
@@ -415,6 +439,11 @@ const Dashboard: React.FC<Props> = ({ projects, useCloud = false, orgId = null, 
                   provider: String(row?.provider ?? ''),
                   occurred_at: String(row?.occurred_at ?? ''),
                 };
+
+                if (filterProjectId !== 'all' && String(nextRow.project_id) !== String(filterProjectId)) {
+                  // When filtering by project, ignore other-project updates so KPIs don't drift.
+                  return;
+                }
 
                 const range = txRangeRef.current;
                 const occurred = new Date(nextRow.occurred_at);
@@ -443,7 +472,9 @@ const Dashboard: React.FC<Props> = ({ projects, useCloud = false, orgId = null, 
                   const { startIso, endIso } = buildRange();
                   return { start: startIso, end: endIso };
                 })();
-                computeMetricsFromRows(txRowsRef.current, metricRange);
+                const rowsForMetrics =
+                  filterProjectId === 'all' ? txRowsRef.current : txRowsRef.current.filter((r) => String(r.project_id) === String(filterProjectId));
+                computeMetricsFromRows(rowsForMetrics, metricRange);
               }
             }
           } catch (e) {
@@ -464,7 +495,7 @@ const Dashboard: React.FC<Props> = ({ projects, useCloud = false, orgId = null, 
       supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [useCloud, orgId]);
+  }, [useCloud, orgId, filterProjectId]);
 
   const net = monthIncome - monthExpense;
   const marginPct = monthIncome > 0 ? net / monthIncome : null;

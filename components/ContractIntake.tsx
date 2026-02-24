@@ -92,7 +92,7 @@ const ContractIntake: React.FC = () => {
   const [address, setAddress] = useState('');
   const [startDate, setStartDate] = useState('');
   const [emergencyContact, setEmergencyContact] = useState('');
-  const [accepted, setAccepted] = useState(false);
+  const [decision, setDecision] = useState<'accept' | 'reject' | null>(null);
   const [cloudSubmitStatus, setCloudSubmitStatus] = useState<'idle' | 'sending' | 'sent' | 'queued' | 'error'>('idle');
   const [cloudSubmitError, setCloudSubmitError] = useState<string>('');
 
@@ -106,7 +106,8 @@ const ContractIntake: React.FC = () => {
     if (typeof draft.address === 'string') setAddress(draft.address);
     if (typeof draft.startDate === 'string') setStartDate(draft.startDate);
     if (typeof draft.emergencyContact === 'string') setEmergencyContact(draft.emergencyContact);
-    if (typeof draft.accepted === 'boolean') setAccepted(draft.accepted);
+    if (typeof draft.decision === 'string' && (draft.decision === 'accept' || draft.decision === 'reject')) setDecision(draft.decision);
+    if (draft.decision == null && typeof draft.accepted === 'boolean') setDecision(draft.accepted ? 'accept' : null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seed?.requestId]);
 
@@ -119,10 +120,12 @@ const ContractIntake: React.FC = () => {
       address,
       startDate,
       emergencyContact,
-      accepted,
+      decision,
       updatedAt: new Date().toISOString(),
     });
-  }, [seed?.requestId, dpi, phone, address, startDate, emergencyContact, accepted]);
+  }, [seed?.requestId, dpi, phone, address, startDate, emergencyContact, decision]);
+
+  const accepted = decision === 'accept';
 
   const enqueuePending = (payload: IntakeResponse) => {
     const pending = readJson<any[]>(PENDING_CONTRACT_INTAKE_KEY, []);
@@ -159,7 +162,22 @@ const ContractIntake: React.FC = () => {
     };
     window.addEventListener('online', onOnline);
     void drainPending();
-    return () => window.removeEventListener('online', onOnline);
+    // Periodic retry (covers the case where RRHH registers the request later)
+    const id = window.setInterval(() => {
+      try {
+        const pending = readJson<any[]>(PENDING_CONTRACT_INTAKE_KEY, []);
+        if (Array.isArray(pending) && pending.length > 0) {
+          void drainPending();
+        }
+      } catch {
+        // ignore
+      }
+    }, 20000);
+
+    return () => {
+      window.removeEventListener('online', onOnline);
+      window.clearInterval(id);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -178,14 +196,23 @@ const ContractIntake: React.FC = () => {
     return base64UrlEncode(JSON.stringify(payload));
   }, [seed, dpi, phone, address, startDate, emergencyContact, accepted]);
 
-  const canSubmit = useMemo(() => {
+  const canSubmitAccepted = useMemo(() => {
     if (!seed) return false;
-    if (!accepted) return false;
+    if (decision !== 'accept') return false;
     if (!dpi.trim()) return false;
     if (!phone.trim()) return false;
     if (!startDate.trim()) return false;
     return true;
-  }, [seed, accepted, dpi, phone, startDate]);
+  }, [seed, decision, dpi, phone, startDate]);
+
+  const canSubmitRejected = useMemo(() => {
+    if (!seed) return false;
+    if (decision !== 'reject') return false;
+    if (!phone.trim()) return false;
+    return true;
+  }, [seed, decision, phone]);
+
+  const canSubmit = decision === 'accept' ? canSubmitAccepted : decision === 'reject' ? canSubmitRejected : false;
 
   const tryCloudSubmit = async () => {
     if (!seed) return false;
@@ -239,7 +266,12 @@ const ContractIntake: React.FC = () => {
         };
         enqueuePending(payload);
         setCloudSubmitStatus('queued');
-        setCloudSubmitError('Sin internet: guardado en el teléfono. Se enviará automáticamente al reconectarse.');
+        const msg = String(e?.message || '');
+        if (msg.toLowerCase().includes('solicitud de contrato no encontrada')) {
+          setCloudSubmitError('RRHH aún no registró la solicitud en el sistema. Mantén este link abierto o intenta más tarde; si urge, envía el código por WhatsApp a RRHH.');
+        } else {
+          setCloudSubmitError('Sin internet o error temporal: guardado en el teléfono. Se enviará automáticamente al reconectarse.');
+        }
       } catch {
         setCloudSubmitStatus('error');
         setCloudSubmitError(String(e?.message || 'No se pudo enviar automáticamente a RRHH.'));
@@ -248,11 +280,23 @@ const ContractIntake: React.FC = () => {
     }
   };
 
+  // Best-effort auto-submit: once the worker completes required fields,
+  // try to send to RRHH without requiring copy/paste.
+  useEffect(() => {
+    if (!canSubmitAccepted) return;
+    if (!isSupabaseConfigured) return;
+    if (cloudSubmitStatus !== 'idle') return;
+    void tryCloudSubmit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canSubmitAccepted, isSupabaseConfigured, cloudSubmitStatus]);
+
   const handleCopy = async () => {
     await tryCloudSubmit();
     try {
       await navigator.clipboard.writeText(responseCode);
-      alert('Código copiado. Envíalo a RRHH para registrar tu contrato.');
+      alert(decision === 'reject'
+        ? 'Código copiado. Envíalo a RRHH para registrar tu rechazo.'
+        : 'Código copiado. Envíalo a RRHH para registrar tu contrato.');
     } catch {
       alert('No se pudo copiar automáticamente. Selecciona el texto y copia manualmente.');
     }
@@ -261,7 +305,13 @@ const ContractIntake: React.FC = () => {
   const handleSendWhatsApp = () => {
     if (!seed) return;
     if (!canSubmit) {
-      alert('Completa los datos obligatorios y acepta los términos.');
+      if (!decision) {
+        alert('Selecciona si aceptas o rechazas el contrato.');
+      } else if (decision === 'accept') {
+        alert('Completa los datos obligatorios (*) para aceptar el contrato.');
+      } else {
+        alert('Ingresa tu teléfono para enviar el rechazo.');
+      }
       return;
     }
     // Best effort: also submit directly to RRHH/Supabase.
@@ -274,6 +324,7 @@ const ContractIntake: React.FC = () => {
       `Empleado: ${seed.employeeName}`,
       `Puesto: ${seed.role}`,
       `Salario: Q${seed.dailyRate}/día`,
+      `Decisión: ${decision === 'reject' ? 'RECHAZA' : 'ACEPTA'}`,
       '',
       'Código de respuesta (pegar en RRHH → Importar):',
       responseCode,
@@ -327,7 +378,7 @@ const ContractIntake: React.FC = () => {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
             <div>
-              <label className="block text-xs text-gray-600 mb-1" htmlFor="intake-dpi">DPI / CUI *</label>
+              <label className="block text-xs text-gray-600 mb-1" htmlFor="intake-dpi">DPI / CUI {decision === 'accept' ? '*' : '(solo si aceptas)'}</label>
               <input id="intake-dpi" className="w-full p-2 border rounded" value={dpi} onChange={e => setDpi(e.target.value)} placeholder="Ej: 1234 56789 0101" />
             </div>
             <div>
@@ -339,7 +390,7 @@ const ContractIntake: React.FC = () => {
               <input id="intake-address" className="w-full p-2 border rounded" value={address} onChange={e => setAddress(e.target.value)} placeholder="Dirección completa" />
             </div>
             <div>
-              <label className="block text-xs text-gray-600 mb-1" htmlFor="intake-start">Fecha inicio *</label>
+              <label className="block text-xs text-gray-600 mb-1" htmlFor="intake-start">Fecha inicio {decision === 'accept' ? '*' : '(solo si aceptas)'}</label>
               <input id="intake-start" type="date" className="w-full p-2 border rounded" value={startDate} onChange={e => setStartDate(e.target.value)} />
             </div>
             <div>
@@ -348,10 +399,17 @@ const ContractIntake: React.FC = () => {
             </div>
           </div>
 
-          <label className="flex items-center gap-2 mt-4 text-sm text-gray-700">
-            <input type="checkbox" checked={accepted} onChange={e => setAccepted(e.target.checked)} />
-            Confirmo que la información es correcta y autorizo su uso para el contrato.
-          </label>
+          <div className="mt-4 text-sm text-gray-700">
+            <div className="font-semibold">Decisión *</div>
+            <label className="flex items-center gap-2 mt-2">
+              <input type="radio" name="contract-decision" checked={decision === 'accept'} onChange={() => setDecision('accept')} />
+              Acepto el contrato y confirmo que la información es correcta.
+            </label>
+            <label className="flex items-center gap-2 mt-2">
+              <input type="radio" name="contract-decision" checked={decision === 'reject'} onChange={() => setDecision('reject')} />
+              Rechazo el contrato.
+            </label>
+          </div>
         </div>
 
         <div className="bg-white rounded-xl shadow-lg p-6">
@@ -408,12 +466,16 @@ const ContractIntake: React.FC = () => {
               disabled={!canSubmit}
               title="Abrir WhatsApp"
             >
-              <Send size={16} /> Enviar por WhatsApp
+              <Send size={16} /> Enviar a RRHH (WhatsApp)
             </button>
           </div>
           {!canSubmit && (
             <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mt-3">
-              Completa los campos obligatorios (*) y acepta la confirmación para habilitar el envío.
+              {decision == null
+                ? 'Selecciona si aceptas o rechazas el contrato para habilitar el envío.'
+                : decision === 'accept'
+                  ? 'Completa los campos obligatorios (*) para aceptar y enviar.'
+                  : 'Ingresa tu teléfono para enviar el rechazo.'}
             </div>
           )}
         </div>

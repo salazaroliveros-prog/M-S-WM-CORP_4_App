@@ -2209,7 +2209,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
                    <tr>
                        <td colSpan={7} className="p-8 text-center text-gray-500">
                            <p className="mb-2">No hay renglones agregados aún.</p>
-                           <p className="text-xs">Utilice el botón "Agregar Siguiente Renglón" para comenzar a presupuestar cronológicamente.</p>
+                       <p className="text-xs">Utilice "Agregar Renglón Personalizado" para comenzar a presupuestar.</p>
                        </td>
                    </tr>
                 )}
@@ -2512,7 +2512,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
                     </td>
                   </tr>
                 )}
-                {!nextLineName && visibleBudgetLines.length > 0 && (
+                {!nextLineName && visibleBudgetLines.length > 0 && typology && (DEFAULT_BUDGET_LINES[typology]?.length ?? 0) > 0 && (
                    <tr>
                        <td colSpan={7} className="p-4 text-center text-green-600 font-bold bg-green-50">
                            <CheckCircle className="inline mr-2" size={18} />

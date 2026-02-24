@@ -171,14 +171,10 @@ const Compras: React.FC<Props> = ({
   onDeleteSupplier,
 }) => {
   const [selectedProjectId, setSelectedProjectId] = useState('');
-  const [supplierName, setSupplierName] = useState('Cemaco');
+  const [supplierName, setSupplierName] = useState('');
   const [supplierPhone, setSupplierPhone] = useState('');
   const [supplierNote, setSupplierNote] = useState('');
-  const [orderItems, setOrderItems] = useState<RequisitionItem[]>([
-    // Defaults for demo if no data provided
-    { name: 'Cemento UGC (Sacos)', quantity: 50, unit: 'Sacos' },
-    { name: 'Hierro 3/8" (Varillas)', quantity: 100, unit: 'Varillas' }
-  ]);
+  const [orderItems, setOrderItems] = useState<RequisitionItem[]>([]);
 
   const selectedProject = useMemo(
     () => projects.find(p => p.id === selectedProjectId) || null,
@@ -195,17 +191,8 @@ const Compras: React.FC<Props> = ({
   }, [projects, selectedProjectId]);
 
   const SUPPLIERS_STORAGE_KEY = 'wm_suppliers_v1';
-  const defaultSuppliers: Supplier[] = useMemo(
-    () => [
-      { id: 'cemaco', name: 'Cemaco', whatsappPhone: '', defaultNoteTemplate: '', termsTemplate: DEFAULT_TERMS },
-      { id: 'martillo', name: 'Ferretería El Martillo', whatsappPhone: '', defaultNoteTemplate: '', termsTemplate: DEFAULT_TERMS },
-      { id: 'lapaz', name: 'Distribuidora La Paz', whatsappPhone: '', defaultNoteTemplate: '', termsTemplate: DEFAULT_TERMS },
-    ],
-    []
-  );
-
-  const [suppliers, setSuppliers] = useState<Supplier[]>(defaultSuppliers);
-  const [selectedSupplierId, setSelectedSupplierId] = useState<string>('cemaco');
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [selectedSupplierId, setSelectedSupplierId] = useState<string>('');
 
   useEffect(() => {
     if (!onListSuppliers) return;
@@ -229,36 +216,6 @@ const Compras: React.FC<Props> = ({
           setSelectedSupplierId(hydrated[0]?.id || '');
           return;
         }
-
-        // If cloud has no suppliers yet, seed defaults (best effort)
-        if (onUpsertSupplier) {
-          for (const s of defaultSuppliers) {
-            try {
-              await onUpsertSupplier({
-                name: s.name,
-                whatsapp: s.whatsappPhone || null,
-                defaultNoteTemplate: s.defaultNoteTemplate || null,
-                termsTemplate: s.termsTemplate || DEFAULT_TERMS,
-              });
-            } catch {
-              // ignore
-            }
-          }
-          const seeded = await onListSuppliers();
-          if (cancelled) return;
-          const seededList = Array.isArray(seeded) ? seeded : [];
-          if (seededList.length > 0) {
-            const hydrated: Supplier[] = seededList.map(s => ({
-              id: String((s as any).id),
-              name: String((s as any).name),
-              whatsappPhone: String((s as any).whatsapp ?? (s as any).phone ?? ''),
-              defaultNoteTemplate: String((s as any).defaultNoteTemplate ?? ''),
-              termsTemplate: String((s as any).termsTemplate ?? DEFAULT_TERMS),
-            }));
-            setSuppliers(hydrated);
-            setSelectedSupplierId(hydrated[0]?.id || '');
-          }
-        }
       } catch {
         // ignore and keep local
       }
@@ -267,7 +224,7 @@ const Compras: React.FC<Props> = ({
     return () => {
       cancelled = true;
     };
-    }, [onListSuppliers, onUpsertSupplier, defaultSuppliers, syncVersion]);
+    }, [onListSuppliers, syncVersion]);
 
   useEffect(() => {
     try {

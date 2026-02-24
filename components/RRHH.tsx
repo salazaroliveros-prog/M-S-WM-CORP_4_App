@@ -13,6 +13,7 @@ interface Props {
   projects: Project[];
   syncVersion?: number;
   isAdmin?: boolean;
+  orgId?: string | null;
   onListEmployees?: () => Promise<any[] | null>;
   onCreateEmployee?: (input: { name: string; dpi?: string; phone?: string; position: string; dailyRate: number; projectId?: string | null }) => Promise<any>;
   onListContracts?: () => Promise<any[] | null>;
@@ -177,6 +178,7 @@ const RRHH: React.FC<Props> = ({
   projects,
   syncVersion,
   isAdmin,
+  orgId,
   onListEmployees,
   onCreateEmployee,
   onListContracts,
@@ -190,14 +192,6 @@ const RRHH: React.FC<Props> = ({
   onDeleteEmployeeRateOverride,
 }) => {
   const [activeTab, setActiveTab] = useState<'CONTRATOS' | 'ASISTENCIA' | 'PLANILLA'>('CONTRATOS');
-  
-  const mockEmployees: Employee[] = useMemo(
-    () => [
-      { id: '1', name: 'Juan Pérez', dpi: '1234', position: 'Albañil', dailyRate: 175, status: 'active', phone: '55555555' },
-      { id: '2', name: 'Carlos López', dpi: '5678', position: 'Peón', dailyRate: 100, status: 'active', phone: '44444444' }
-    ],
-    []
-  );
 
   const STORAGE_EMPLOYEES = 'wm_employees_v1';
   const STORAGE_PAY_RATES = 'wm_pay_rates_v1';
@@ -377,12 +371,13 @@ const RRHH: React.FC<Props> = ({
     }
   }, [employeeRateOverrides]);
 
-  const [employees, setEmployees] = useState<Employee[]>(() => loadLocalEmployees() ?? mockEmployees);
+  const [employees, setEmployees] = useState<Employee[]>(() => loadLocalEmployees() ?? []);
   const [loadingEmployees, setLoadingEmployees] = useState(false);
 
   const [attendanceDate, setAttendanceDate] = useState<string>(() => toISODate(new Date()));
   const [attendanceRows, setAttendanceRows] = useState<any[]>([]);
   const [loadingAttendance, setLoadingAttendance] = useState(false);
+  const attendanceRefreshTimerRef = useRef<number | null>(null);
 
   const [payrollAttendanceRows, setPayrollAttendanceRows] = useState<any[]>([]);
   const [loadingPayrollAttendance, setLoadingPayrollAttendance] = useState(false);
@@ -400,7 +395,7 @@ const RRHH: React.FC<Props> = ({
   const [payrollBusy, setPayrollBusy] = useState(false);
   const [payrollComputed, setPayrollComputed] = useState<Record<string, { daysWorked: number }>>({});
 
-  const refreshAttendance = async () => {
+  const refreshAttendance = useCallback(async () => {
     if (!onListAttendance) {
       setAttendanceRows([]);
       return;
@@ -414,7 +409,88 @@ const RRHH: React.FC<Props> = ({
     } finally {
       setLoadingAttendance(false);
     }
-  };
+  }, [attendanceDate, onListAttendance]);
+
+  const scheduleRefreshAttendance = useCallback(() => {
+    // Avoid hammering network when multiple realtime events arrive.
+    if (attendanceRefreshTimerRef.current) window.clearTimeout(attendanceRefreshTimerRef.current);
+    attendanceRefreshTimerRef.current = window.setTimeout(() => {
+      void refreshAttendance();
+    }, 250);
+  }, [refreshAttendance]);
+
+  useEffect(() => {
+    return () => {
+      if (attendanceRefreshTimerRef.current) {
+        window.clearTimeout(attendanceRefreshTimerRef.current);
+        attendanceRefreshTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    if (!orgId) return;
+    if (activeTab !== 'ASISTENCIA') return;
+    if (!attendanceDate || !isLikelyIsoDateOnly(attendanceDate)) return;
+
+    const supabase = getSupabaseClient();
+    const filter = `org_id=eq.${orgId},work_date=eq.${attendanceDate}`;
+    const channel = supabase
+      .channel(`attendance-realtime-admin:${orgId}:${attendanceDate}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'attendance', filter },
+        (payload) => {
+          const row = (payload as any)?.new;
+          if (!row) return;
+          setAttendanceRows((prev) => {
+            const id = String(row?.id || '');
+            if (!id) return [row, ...prev];
+            const next = Array.isArray(prev) ? [...prev] : [];
+            const idx = next.findIndex((r) => String((r as any)?.id || '') === id);
+            if (idx >= 0) next[idx] = { ...(next[idx] as any), ...(row as any) };
+            else next.unshift(row);
+            return next;
+          });
+          scheduleRefreshAttendance();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'attendance', filter },
+        (payload) => {
+          const row = (payload as any)?.new;
+          if (!row) return;
+          setAttendanceRows((prev) => {
+            const id = String(row?.id || '');
+            if (!id) return [row, ...prev];
+            const next = Array.isArray(prev) ? [...prev] : [];
+            const idx = next.findIndex((r) => String((r as any)?.id || '') === id);
+            if (idx >= 0) next[idx] = { ...(next[idx] as any), ...(row as any) };
+            else next.unshift(row);
+            return next;
+          });
+          scheduleRefreshAttendance();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'attendance', filter },
+        (payload) => {
+          const row = (payload as any)?.old;
+          const id = String(row?.id || '');
+          if (!id) return;
+          setAttendanceRows((prev) => (Array.isArray(prev) ? prev.filter((r) => String((r as any)?.id || '') !== id) : []));
+          scheduleRefreshAttendance();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [activeTab, attendanceDate, isAdmin, orgId, scheduleRefreshAttendance]);
 
   const refreshPayrollAttendance = useCallback(async () => {
     if (!isAdmin) {
@@ -544,7 +620,16 @@ const RRHH: React.FC<Props> = ({
       const mapped: ContractRecord[] = rows
         .filter((r: any) => r && (r.request_id || r.requestId))
         .map((r: any) => {
-          const seed = (r.seed ?? {}) as ContractSeed;
+          const seed = { ...(r.seed ?? {}) } as ContractSeed;
+          // Hydrate seed with authoritative columns (older rows may not embed these in seed)
+          if (!seed.employeeId && r.employee_id) seed.employeeId = String(r.employee_id);
+          if (!seed.projectId && r.project_id) seed.projectId = String(r.project_id);
+          if (!seed.employeePhone && r.employee_phone) seed.employeePhone = String(r.employee_phone);
+          if (!seed.employeeName && r.employee_name) seed.employeeName = String(r.employee_name);
+          if (!seed.role && r.role) seed.role = String(r.role);
+          if ((seed.dailyRate == null || Number.isNaN(Number(seed.dailyRate))) && r.daily_rate != null) {
+            (seed as any).dailyRate = safeNumber(r.daily_rate, 0);
+          }
           const response = (r.response ?? undefined) as ContractResponse | undefined;
           const requestId = String(r.request_id ?? r.requestId ?? seed.requestId);
           const status: 'sent' | 'received' = String(r.status ?? 'sent') === 'received' || response ? 'received' : 'sent';
@@ -811,6 +896,7 @@ const RRHH: React.FC<Props> = ({
     const set = new Set<string>();
     contracts.forEach((c) => {
       if (c?.status !== 'received') return;
+      if (c?.response?.accepted !== true) return;
       const id = c?.seed?.employeeId ? String(c.seed.employeeId) : '';
       if (id) set.add(id);
     });
@@ -867,7 +953,8 @@ const RRHH: React.FC<Props> = ({
       'Por favor abrir el link y completar los datos:',
       contractLink,
       '',
-      'Al finalizar, envía el CÓDIGO DE RESPUESTA a RRHH.',
+      'Al finalizar, si tienes internet se enviará automáticamente a RRHH.',
+      'Si no se envía automáticamente, envía el CÓDIGO DE RESPUESTA a RRHH.',
       'Nota: el código contiene datos personales; no lo compartas con terceros.',
     ].filter(Boolean).join('\n');
     const link = buildWhatsAppLink(contractPhone || null, msg);
@@ -889,18 +976,21 @@ const RRHH: React.FC<Props> = ({
       if (!isLikelyUuid(requestId)) throw new Error('requestId inválido. Solicita un nuevo link a RRHH.');
       const employeeName = requireNonEmptyTrim(parsed?.employeeName, 'Nombre del empleado');
       const role = requireNonEmptyTrim(parsed?.role, 'Puesto');
-      if (!parsed?.accepted) throw new Error('El colaborador no aceptó la confirmación.');
-      requireNonEmptyTrim(parsed?.dpi, 'DPI / CUI');
       requireNonEmptyTrim(parsed?.phone, 'Teléfono');
-      const startDate = requireNonEmptyTrim(parsed?.startDate, 'Fecha de inicio');
-      if (!isLikelyIsoDateOnly(startDate)) throw new Error('Fecha de inicio inválida.');
-      // Validar firma y selfie
-      if (!signatureUrl) throw new Error('Debe capturar la firma digital del colaborador.');
-      if (!selfieUrl) throw new Error('Debe capturar la selfie del colaborador.');
-      // Validar experiencia y referencias
-      const minExp = minExperienceByRole[role] ?? 0;
-      if (experienceYears < minExp) throw new Error(`El puesto requiere al menos ${minExp} años de experiencia.`);
-      if (['Supervisor','Encargado','Maestro de obras','Albañil'].includes(role) && references.length < 2) throw new Error('Debe ingresar al menos 2 referencias laborales para este puesto.');
+      const accepted = Boolean(parsed?.accepted);
+
+      if (accepted) {
+        requireNonEmptyTrim(parsed?.dpi, 'DPI / CUI');
+        const startDate = requireNonEmptyTrim(parsed?.startDate, 'Fecha de inicio');
+        if (!isLikelyIsoDateOnly(startDate)) throw new Error('Fecha de inicio inválida.');
+        // Validar firma y selfie
+        if (!signatureUrl) throw new Error('Debe capturar la firma digital del colaborador.');
+        if (!selfieUrl) throw new Error('Debe capturar la selfie del colaborador.');
+        // Validar experiencia y referencias
+        const minExp = minExperienceByRole[role] ?? 0;
+        if (experienceYears < minExp) throw new Error(`El puesto requiere al menos ${minExp} años de experiencia.`);
+        if (['Supervisor','Encargado','Maestro de obras','Albañil'].includes(role) && references.length < 2) throw new Error('Debe ingresar al menos 2 referencias laborales para este puesto.');
+      }
 
       const existing = contracts.find((c) => c.requestId === requestId) || null;
       if (existing?.seed) {
@@ -948,28 +1038,30 @@ const RRHH: React.FC<Props> = ({
       });
 
       // Optionally create/update local employee record when Supabase isn't available
-      const local = loadLocalEmployees() ?? [];
-      const found = local.find(e => e.name.trim().toLowerCase() === parsed.employeeName.trim().toLowerCase() && (parsed.phone ? e.phone === parsed.phone : true));
-      const dailyRate = safeNumber(parsed.dailyRate, 0);
-      if (!found) {
-        const created: Employee = {
-          id: crypto.randomUUID(),
-          name: parsed.employeeName,
-          dpi: parsed.dpi || '',
-          phone: parsed.phone || '',
-          position: parsed.role as any,
-          dailyRate,
-          status: 'active',
-          projectId: projectForEmployee || undefined,
-        };
-        const next = [created, ...local];
-        saveLocalEmployees(next);
-        setEmployees(next);
-      } else {
-        const next = local.map(e => (e.id === found.id ? ({ ...e, dpi: parsed.dpi || e.dpi, phone: parsed.phone || e.phone } as Employee) : e));
-        saveLocalEmployees(next);
-        setEmployees(next);
-        setEmployeeRateOverrides(prev => ({ ...prev, [found.id]: dailyRate }));
+      if (accepted) {
+        const local = loadLocalEmployees() ?? [];
+        const found = local.find(e => e.name.trim().toLowerCase() === parsed.employeeName.trim().toLowerCase() && (parsed.phone ? e.phone === parsed.phone : true));
+        const dailyRate = safeNumber(parsed.dailyRate, 0);
+        if (!found) {
+          const created: Employee = {
+            id: crypto.randomUUID(),
+            name: parsed.employeeName,
+            dpi: parsed.dpi || '',
+            phone: parsed.phone || '',
+            position: parsed.role as any,
+            dailyRate,
+            status: 'active',
+            projectId: projectForEmployee || undefined,
+          };
+          const next = [created, ...local];
+          saveLocalEmployees(next);
+          setEmployees(next);
+        } else {
+          const next = local.map(e => (e.id === found.id ? ({ ...e, dpi: parsed.dpi || e.dpi, phone: parsed.phone || e.phone } as Employee) : e));
+          saveLocalEmployees(next);
+          setEmployees(next);
+          setEmployeeRateOverrides(prev => ({ ...prev, [found.id]: dailyRate }));
+        }
       }
 
       try {
@@ -990,7 +1082,7 @@ const RRHH: React.FC<Props> = ({
         // ignore cloud errors; local persistence already done
       }
 
-      alert('Contrato importado.');
+      alert(accepted ? 'Contrato importado.' : 'Rechazo importado.');
       setContractImportCode('');
     } catch (e: any) {
       alert(e?.message || 'No se pudo importar el contrato');
@@ -1706,11 +1798,26 @@ const RRHH: React.FC<Props> = ({
               </thead>
               <tbody>
                 {contracts.map((c) => (
-                  <tr key={c.requestId} className={c.status === 'received' ? 'bg-green-50' : ''}>
+                  <tr
+                    key={c.requestId}
+                    className={
+                      c.status !== 'received'
+                        ? ''
+                        : c.response?.accepted === true
+                          ? 'bg-green-50'
+                          : c.response?.accepted === false
+                            ? 'bg-red-50'
+                            : 'bg-green-50'
+                    }
+                  >
                     <td>{c.seed.employeeName}</td>
                     <td>{c.seed.role}</td>
                     <td>{c.seed.projectName || '—'}</td>
-                    <td>{c.status === 'received' ? 'Recibido' : 'Enviado'}</td>
+                    <td>
+                      {c.status === 'received'
+                        ? (c.response?.accepted === true ? 'Aceptado' : c.response?.accepted === false ? 'Rechazado' : 'Recibido')
+                        : 'Enviado'}
+                    </td>
                     <td className="whitespace-nowrap">
                       <button type="button" className="btn-secondary btn-xs mr-1" onClick={() => printContract(c)}>Imprimir</button>
                       <button type="button" className="btn-secondary btn-xs" onClick={() => downloadContractPdf(c)}>PDF</button>
@@ -1806,12 +1913,12 @@ const RRHH: React.FC<Props> = ({
 
             {isAdmin && attendanceCenter && (
               <div className="my-4 w-full h-96 rounded-xl overflow-hidden shadow">
-                <MapContainer center={attendanceCenter} zoom={16} style={{ width: '100%', height: '100%' }}>
+                <MapContainer key={attendanceDate} center={attendanceCenter} zoom={16} style={{ width: '100%', height: '100%' }}>
                   <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
                   {attendanceRows
                     .filter((x) => Number.isFinite(Number(x?.location_lat)) && Number.isFinite(Number(x?.location_lng)))
                     .map((row, idx) => (
-                      <Marker key={idx} position={[Number(row.location_lat), Number(row.location_lng)]}>
+                      <Marker key={String(row?.id ?? `${row?.employee_id ?? 'emp'}_${row?.work_date ?? attendanceDate}_${idx}`)} position={[Number(row.location_lat), Number(row.location_lng)]}>
                         <Popup>
                           <div>
                             <b>{employees.find((e) => e.id === row.employee_id)?.name || row.employee_id || 'Empleado'}</b>
