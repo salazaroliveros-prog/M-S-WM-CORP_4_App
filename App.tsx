@@ -798,8 +798,10 @@ const App: React.FC = () => {
   // Auto-initialize Supabase cloud when VITE_SUPABASE_URL + ANON_KEY are present.
   useEffect(() => {
     if (!isSupabaseConfigured) return;
-    // set that we attempted cloud so UI shows appropriate status badges
-    setCloudLoginAttempted(true);
+    // Do not mark the cloud login as 'attempted' so the app remains in
+    // 'local mode' UI while offline. We'll only set `cloudLoginAttempted`
+    // when the user explicitly tries to connect or when an authenticated
+    // session is detected.
 
     let cancelled = false;
     const initCloud = async () => {
