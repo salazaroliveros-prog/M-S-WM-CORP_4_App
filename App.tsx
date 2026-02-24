@@ -2557,13 +2557,20 @@ const App: React.FC = () => {
       {/* Main Content Area */}
       <main className="flex-1 overflow-auto md:pt-0 pt-16 relative">
         <div className="p-4 md:p-8 max-w-7xl mx-auto h-full">
-          {cloudError && (
-            <div className="mb-4 bg-red-50 border border-red-200 text-red-700 p-3 rounded">
-              <strong>Error Supabase:</strong> {cloudError}
-            </div>
-          )}
+          {(() => {
+            const needsAuthByError = cloudError ? isAnonymousAuthDisabledError({ message: cloudError }) : false;
+            const showCloudAuth = isSupabaseConfigured && cloudLoginAttempted && !orgId && (cloudNeedsAuth || needsAuthByError);
+            const showCloudError = Boolean(cloudError) && !needsAuthByError;
 
-          {!cloudError && isSupabaseConfigured && cloudLoginAttempted && !orgId && cloudNeedsAuth && (
+            return (
+              <>
+                {showCloudError && (
+                  <div className="mb-4 bg-red-50 border border-red-200 text-red-700 p-3 rounded">
+                    <strong>Error Supabase:</strong> {cloudError}
+                  </div>
+                )}
+
+                {showCloudAuth && (
             <div className="mb-4 bg-amber-50 border border-amber-200 text-amber-900 p-3 rounded">
               <div className="flex items-start justify-between gap-3 flex-wrap">
                 <div className="min-w-[240px]">
@@ -2620,7 +2627,10 @@ const App: React.FC = () => {
                 </div>
               )}
             </div>
-          )}
+                )}
+              </>
+            );
+          })()}
 
           {/* Header with Date/Time for every view */}
           <header className="mb-6 flex justify-between items-center border-b pb-4">
