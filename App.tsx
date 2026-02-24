@@ -756,6 +756,7 @@ const App: React.FC = () => {
   const [cloudAuthPassword, setCloudAuthPassword] = useState('');
   const [cloudAuthBusy, setCloudAuthBusy] = useState(false);
   const [cloudAuthError, setCloudAuthError] = useState<string | null>(null);
+  const [usedAutoLogin, setUsedAutoLogin] = useState(false);
 
   const [syncVersion, setSyncVersion] = useState(0);
   const realtimeChannelRef = useRef<any>(null);
@@ -2315,6 +2316,13 @@ const App: React.FC = () => {
           try {
             autoTried = true;
             await ensureSupabaseSession(autoEmail, autoPassword);
+            setUsedAutoLogin(true);
+            try {
+              const masked = autoEmail.replace(/(.{2}).+(@.+)/, '$1***$2');
+              toast.info(`Conectado automáticamente como ${masked}`, { autoClose: 4000 });
+            } catch {
+              toast.info('Conectado automáticamente', { autoClose: 4000 });
+            }
           } catch (e: any) {
             console.warn('Auto email login failed, falling back to anonymous:', e?.message || e);
           }
