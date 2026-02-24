@@ -547,8 +547,8 @@ const WorkerAttendance: React.FC = () => {
 
   if (!token) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
-        <div className="bg-white rounded-xl shadow-lg p-6 w-full max-w-xl">
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4 sm:p-6">
+        <div className="bg-white rounded-xl shadow-lg p-4 sm:p-6 w-full max-w-xl">
           <div className="font-bold text-navy-900 text-lg mb-2">Asistencia</div>
           <div className="text-sm text-gray-600">Link inválido o incompleto. Solicita un nuevo link a RRHH.</div>
         </div>
@@ -564,18 +564,22 @@ const WorkerAttendance: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
+    <div className="min-h-screen bg-gray-50 p-4 sm:p-6 overflow-x-hidden">
       <div className="max-w-3xl mx-auto space-y-4">
-        <div className="bg-white rounded-xl shadow-lg p-6">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="font-bold text-navy-900 text-lg">Asistencia (GPS + Biométrico)</div>
+        <div className="bg-white rounded-xl shadow-lg p-4 sm:p-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="min-w-0">
+              <div className="font-bold text-navy-900 text-lg leading-tight break-words">Asistencia (GPS + Biométrico)</div>
               <div className="text-xs text-gray-500">Marca tu entrada/salida. El sistema registra tu GPS y una evidencia biométrica (teléfono o código de lector).</div>
-              {employeeName && <div className="text-xs text-gray-500 mt-1">Trabajador: <span className="font-semibold">{employeeName}</span></div>}
+              {employeeName && (
+                <div className="text-xs text-gray-500 mt-1 break-words">
+                  Trabajador: <span className="font-semibold">{employeeName}</span>
+                </div>
+              )}
             </div>
             <button
               type="button"
-              className="px-3 py-2 rounded border bg-white hover:bg-gray-50 flex items-center gap-2 text-sm disabled:opacity-50"
+              className="px-3 py-2 rounded border bg-white hover:bg-gray-50 flex items-center justify-center gap-2 text-sm disabled:opacity-50 shrink-0"
               onClick={handleRefresh}
               disabled={geo.status === 'loading' || webauthnBusy}
               title="Actualizar asistencia"
@@ -702,7 +706,7 @@ const WorkerAttendance: React.FC = () => {
         </div>
 
         <div className="text-xs text-gray-500">
-          Nota: Para que funcione, RRHH debe generar el link de asistencia y Supabase debe tener aplicada la migración de asistencia/token.
+          Nota: Para que funcione, RRHH debe generar el link de asistencia y Supabase debe tener aplicada la migración de asistencia/token. Para rastreo cada 1 min en segundo plano, permite ubicación “todo el tiempo” y en Android desactiva optimización de batería para esta app.
         </div>
       </div>
     </div>

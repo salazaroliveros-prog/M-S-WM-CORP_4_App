@@ -146,6 +146,7 @@ Validaciones:
 - [ ] `token` válido.
 - [ ] GPS listo.
 - [ ] WebAuthn sólo si HTTPS/secure context; si no, usar código.
+- [ ] Si se requiere rastreo cada 1 min en segundo plano (Android nativo): seguir [ANDROID_OEM_BACKGROUND_LOCATION.md](ANDROID_OEM_BACKGROUND_LOCATION.md).
 
 Enlaces:
 - RPC resuelve `token` → `employee_id` + `org_id`.

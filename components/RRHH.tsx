@@ -1920,7 +1920,7 @@ const RRHH: React.FC<Props> = ({
             </div>
 
             {isAdmin && attendanceCenter && (
-              <div className="my-4 w-full h-96 rounded-xl overflow-hidden shadow">
+              <div className="my-4 w-full h-72 sm:h-96 rounded-xl overflow-hidden shadow">
                 <MapContainer key={attendanceDate} center={attendanceCenter} zoom={16} style={{ width: '100%', height: '100%' }}>
                   <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
                   {attendanceRows
