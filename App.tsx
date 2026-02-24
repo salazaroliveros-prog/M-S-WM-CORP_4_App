@@ -2304,9 +2304,27 @@ const App: React.FC = () => {
           // ignore; will try anonymous below
         }
 
-        // Login cloud SIN credenciales: usamos una sesión anónima por dispositivo.
-        // Esto permite CRUD/Realtime bajo RLS sin pedir email/contraseña de Supabase.
-        await ensureSupabaseAnonymousSession();
+        // Attempt automatic login from build-time env vars (for GitHub Pages deployments).
+        // If VITE_SUPABASE_AUTO_EMAIL and VITE_SUPABASE_AUTO_PASSWORD are set at build time,
+        // prefer signing in with those credentials (so deployed PWA can auto-login).
+        const metaEnvLocal = ((import.meta as any).env ?? {}) as Record<string, any>;
+        const autoEmail = String(metaEnvLocal.VITE_SUPABASE_AUTO_EMAIL || '').trim();
+        const autoPassword = String(metaEnvLocal.VITE_SUPABASE_AUTO_PASSWORD || '');
+        let autoTried = false;
+        if (autoEmail && autoPassword) {
+          try {
+            autoTried = true;
+            await ensureSupabaseSession(autoEmail, autoPassword);
+          } catch (e: any) {
+            console.warn('Auto email login failed, falling back to anonymous:', e?.message || e);
+          }
+        }
+
+        if (!autoTried) {
+          // Login cloud SIN credenciales: usamos una sesión anónima por dispositivo.
+          // Esto permite CRUD/Realtime bajo RLS sin pedir email/contraseña de Supabase.
+          await ensureSupabaseAnonymousSession();
+        }
 
         const desiredOrgId = getConfiguredOrgId();
         if (!desiredOrgId) {
@@ -2354,6 +2372,22 @@ const App: React.FC = () => {
       setCloudAuthBusy(false);
     }
   };
+
+  // Allow resetting cloud login and clearing local storage/session from console.
+  const resetCloudLogin = async () => {
+    try {
+      localStorage.removeItem(LOCAL_PASSWORD_KEY);
+      try { await getSupabaseClient().auth.signOut(); } catch { /* ignore */ }
+      window.location.reload();
+    } catch (e) {
+      console.error('resetCloudLogin failed', e);
+    }
+  };
+
+  // expose helper for user to call from console: window.__resetCloudLogin()
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore
+  window.__resetCloudLogin = resetCloudLogin;
 
   useEffect(() => {
     if (!isSupabaseConfigured || !orgId) return;
