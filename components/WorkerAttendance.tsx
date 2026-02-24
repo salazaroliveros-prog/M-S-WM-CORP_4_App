@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Fingerprint, LogIn, LogOut, RefreshCw, ShieldCheck, UserPlus } from 'lucide-react';
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
-import { getAttendanceTokenInfo, submitAttendanceWithToken, webauthnInvoke } from '../lib/db';
+import { getAttendanceTokenInfo, pingAttendanceLocationWithToken, submitAttendanceWithToken, webauthnInvoke } from '../lib/db';
 
 function todayISO() {
   const d = new Date();
@@ -20,6 +20,7 @@ type GeoState = {
 };
 
 const PENDING_WORKER_ATTENDANCE_KEY = 'wm_pending_worker_attendance_v1';
+const PENDING_WORKER_LOCATION_PINGS_KEY = 'wm_pending_worker_location_pings_v1';
 
 function readJson<T>(key: string, fallback: T): T {
   try {
@@ -106,6 +107,13 @@ const WorkerAttendance: React.FC = () => {
   const [sending, setSending] = useState(false);
   const [lastResult, setLastResult] = useState<any | null>(null);
 
+  // If the server says "check-in required", stop pinging until a successful check-in/out happens.
+  const pingDisabledRef = useRef(false);
+  const geoRef = useRef<GeoState>({ status: 'idle' });
+  useEffect(() => {
+    geoRef.current = geo;
+  }, [geo]);
+
   const drainPending = async () => {
     const pending = readJson<any[]>(PENDING_WORKER_ATTENDANCE_KEY, []);
     if (!Array.isArray(pending) || pending.length === 0) return;
@@ -122,9 +130,26 @@ const WorkerAttendance: React.FC = () => {
     writeJson(PENDING_WORKER_ATTENDANCE_KEY, still);
   };
 
+  const drainPendingLocationPings = async () => {
+    const pending = readJson<any[]>(PENDING_WORKER_LOCATION_PINGS_KEY, []);
+    if (!Array.isArray(pending) || pending.length === 0) return;
+
+    const still: any[] = [];
+    for (const op of pending) {
+      try {
+        if (!op?.payload) continue;
+        await pingAttendanceLocationWithToken(op.payload);
+      } catch {
+        still.push(op);
+      }
+    }
+    writeJson(PENDING_WORKER_LOCATION_PINGS_KEY, still);
+  };
+
   useEffect(() => {
     const onOnline = () => {
       void drainPending();
+      void drainPendingLocationPings();
     };
     window.addEventListener('online', onOnline);
     return () => window.removeEventListener('online', onOnline);
@@ -264,6 +289,95 @@ const WorkerAttendance: React.FC = () => {
     );
   };
 
+  // Keep GPS updated while the app is open (best-effort; browsers may pause in background).
+  useEffect(() => {
+    if (!token) return;
+    if (!canUseGeolocation) return;
+
+    let watchId: number | null = null;
+    try {
+      watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          setGeo({
+            status: 'ready',
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            accuracyM: pos.coords.accuracy,
+          });
+        },
+        (err) => {
+          setGeo((prev) => ({ ...prev, status: 'error', error: err.message || 'No se pudo obtener ubicación.' }));
+        },
+        { enableHighAccuracy: true, timeout: 20000, maximumAge: 15000 }
+      );
+    } catch {
+      // ignore
+    }
+
+    return () => {
+      if (watchId != null) {
+        try {
+          navigator.geolocation.clearWatch(watchId);
+        } catch {
+          // ignore
+        }
+      }
+    };
+  }, [token, canUseGeolocation]);
+
+  const pingLocation = async () => {
+    if (!token) return;
+    if (pingDisabledRef.current) return;
+    const g = geoRef.current;
+    if (g.status !== 'ready' || g.lat === undefined || g.lng === undefined) return;
+
+    const payload = {
+      token,
+      workDate,
+      lat: g.lat,
+      lng: g.lng,
+      accuracyM: g.accuracyM ?? null,
+      device: deviceInfo,
+    };
+
+    try {
+      await pingAttendanceLocationWithToken(payload);
+    } catch (e: any) {
+      const msg = String(e?.message || '').toLowerCase();
+      if (msg.includes('marque entrada primero')) {
+        pingDisabledRef.current = true;
+        return;
+      }
+
+      // Offline-first fallback: queue pings and retry when online.
+      try {
+        const pending = readJson<any[]>(PENDING_WORKER_LOCATION_PINGS_KEY, []);
+        const next = Array.isArray(pending) ? pending : [];
+        next.push({ id: crypto.randomUUID(), queuedAt: new Date().toISOString(), payload });
+        writeJson(PENDING_WORKER_LOCATION_PINGS_KEY, next);
+      } catch {
+        // ignore
+      }
+    }
+  };
+
+  // Ping every 1 minute (best-effort). Browsers may throttle timers in background.
+  useEffect(() => {
+    if (!token) return;
+    const id = window.setInterval(() => {
+      void pingLocation();
+    }, 60_000);
+    // Try an early ping once we have GPS.
+    const warmup = window.setTimeout(() => {
+      void pingLocation();
+    }, 3_000);
+    return () => {
+      window.clearInterval(id);
+      window.clearTimeout(warmup);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
   const handleSubmit = async (action: 'check_in' | 'check_out') => {
     if (!token) {
       alert('Link inválido: falta el token (#asistencia=...).');
@@ -315,6 +429,8 @@ const WorkerAttendance: React.FC = () => {
       const res = await submitAttendanceWithToken(payload);
 
       setLastResult(res);
+      pingDisabledRef.current = false;
+      void pingLocation();
       alert(action === 'check_in' ? 'Entrada registrada.' : 'Salida registrada.');
     } catch (e: any) {
       // Offline-first fallback: keep the attempt locally and retry when online.

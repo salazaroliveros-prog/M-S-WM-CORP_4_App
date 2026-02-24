@@ -15,6 +15,7 @@ import {
   listProjects,
   setEmployeeAttendanceToken,
   submitAttendanceWithToken,
+  pingAttendanceLocationWithToken,
   listAttendanceForDate,
   getAttendanceTokenInfo,
   webauthnInvoke,
@@ -200,6 +201,16 @@ describe('lib/db Supabase wiring (unit)', () => {
     });
     expect(submitRes).toEqual({ ok: true });
 
+    const pingRes = await pingAttendanceLocationWithToken({
+      token,
+      workDate: '2026-02-04',
+      lat: 1,
+      lng: 2,
+      accuracyM: 3,
+      device: { d: 'y' },
+    });
+    expect(pingRes).toEqual({ ok: true });
+
     const rows = await listAttendanceForDate('org1', '2026-02-04');
     expect(rows).toHaveLength(1);
 
@@ -214,6 +225,7 @@ describe('lib/db Supabase wiring (unit)', () => {
       expect.arrayContaining([
         'set_employee_attendance_token',
         'submit_attendance_with_token',
+        'ping_attendance_location_with_token',
         'get_attendance_token_info',
       ])
     );

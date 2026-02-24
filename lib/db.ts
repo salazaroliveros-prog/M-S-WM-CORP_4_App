@@ -2140,6 +2140,39 @@ export async function submitAttendanceWithToken(input: {
   return data;
 }
 
+export async function pingAttendanceLocationWithToken(input: {
+  token: string;
+  workDate?: string; // yyyy-mm-dd
+  lat: number;
+  lng: number;
+  accuracyM?: number | null;
+  device?: any | null;
+}): Promise<any> {
+  const supabase = getSupabaseClient();
+
+  const tokenTrimmed = normalizeAttendanceToken(input?.token);
+  const lat = requireFiniteNumber(input?.lat, 'lat');
+  const lng = requireFiniteNumber(input?.lng, 'lng');
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) throw new Error('Ubicación inválida.');
+
+  const args: Record<string, any> = {
+    p_token: tokenTrimmed,
+    p_lat: lat,
+    p_lng: lng,
+    p_accuracy_m: input.accuracyM ?? null,
+    p_device: input.device ?? null,
+  };
+  if (typeof input.workDate === 'string' && input.workDate.length > 0) {
+    args.p_work_date = input.workDate;
+  }
+
+  const res = await supabase.rpc('ping_attendance_location_with_token', args);
+  if (res.error) rethrowAttendanceRpcError(res.error, 'No se pudo actualizar la ubicación');
+  const data = res.data as any;
+  if (Array.isArray(data)) return data[0] ?? null;
+  return data;
+}
+
 export async function listAttendanceForDate(orgId: string, workDate: string): Promise<any[]> {
   const supabase = getSupabaseClient();
 
