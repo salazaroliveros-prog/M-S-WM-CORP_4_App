@@ -1,6 +1,45 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { FileText, Copy, Send } from 'lucide-react';
-import { isSupabaseConfigured } from '../lib/supabaseClient';
+import { isSupabaseConfigured, getSupabaseClient } from '../lib/supabaseClient';
+  // --- Realtime Supabase: actualizar automáticamente si hay cambios en la respuesta del contrato ---
+  useEffect(() => {
+    let channel: any = null;
+    let mounted = true;
+    const setupRealtime = async () => {
+      if (!isSupabaseConfigured || !seed?.requestId) return;
+      try {
+        const supabase = getSupabaseClient();
+        const filter = `request_id=eq.${seed.requestId}`;
+        channel = supabase
+          .channel(`contract-intake-realtime:${seed.requestId}`)
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'employee_contract_responses', filter },
+            (payload: any) => {
+              if (!mounted) return;
+              // Refrescar estado de envío automático (cloudSubmitStatus)
+              setCloudSubmitStatus('idle');
+            }
+          )
+          .subscribe();
+      } catch {
+        // ignore
+      }
+    };
+    setupRealtime();
+    return () => {
+      mounted = false;
+      if (channel) {
+        try {
+          const supabase = getSupabaseClient();
+          supabase.removeChannel(channel);
+        } catch {
+          // ignore
+        }
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seed?.requestId]);
 import { submitEmployeeContractResponsePublic } from '../lib/db';
 
 type IntakeSeed = {

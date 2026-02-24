@@ -3,6 +3,55 @@ import { Fingerprint, LogIn, LogOut, RefreshCw, ShieldCheck, UserPlus } from 'lu
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { getAttendanceTokenInfo, pingAttendanceLocationWithToken, submitAttendanceWithToken, webauthnInvoke } from '../lib/db';
+import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabaseClient';
+  // --- Realtime Supabase: actualizar automáticamente si hay cambios en asistencia ---
+  useEffect(() => {
+    let channel: any = null;
+    let orgId: string | null = null;
+    let employeeId: string | null = null;
+    let workDate: string | null = null;
+    let mounted = true;
+
+    const setupRealtime = async () => {
+      if (!isSupabaseConfigured || !token) return;
+      try {
+        const info = await getAttendanceTokenInfo(token);
+        orgId = info?.orgId || null;
+        employeeId = info?.employeeId || null;
+        workDate = todayISO();
+        if (!orgId || !employeeId) return;
+        const supabase = getSupabaseClient();
+        const filter = `org_id=eq.${orgId},employee_id=eq.${employeeId},work_date=eq.${workDate}`;
+        channel = supabase
+          .channel(`attendance-realtime-worker:${orgId}:${employeeId}:${workDate}`)
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'attendance', filter },
+            (payload: any) => {
+              if (!mounted) return;
+              // Refrescar datos de asistencia (ejecutar pingLocation para forzar actualización visual)
+              void pingLocation();
+            }
+          )
+          .subscribe();
+      } catch {
+        // ignore
+      }
+    };
+    setupRealtime();
+    return () => {
+      mounted = false;
+      if (channel) {
+        try {
+          const supabase = getSupabaseClient();
+          supabase.removeChannel(channel);
+        } catch {
+          // ignore
+        }
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
 
 type BgWatcherOptions = {
   backgroundMessage?: string;

@@ -207,12 +207,13 @@ export const DEMO_DEFAULT_BUDGET_LINES: Record<Typology, Partial<BudgetLine>[]> 
 
 // Production default: no preloaded "standard" budget lines.
 // Budget lines should be entered by the user (or imported/suggested from real catalogs).
+// DEFAULT_BUDGET_LINES ahora contiene todos los renglones demo, en orden cronológico.
 export const DEFAULT_BUDGET_LINES: Record<Typology, Partial<BudgetLine>[]> = {
-  RESIDENCIAL: [],
-  COMERCIAL: [],
-  INDUSTRIAL: [],
-  CIVIL: [],
-  PUBLICA: [],
+  RESIDENCIAL: [...DEMO_DEFAULT_BUDGET_LINES.RESIDENCIAL],
+  COMERCIAL: [...DEMO_DEFAULT_BUDGET_LINES.COMERCIAL],
+  INDUSTRIAL: [...DEMO_DEFAULT_BUDGET_LINES.INDUSTRIAL],
+  CIVIL: [...DEMO_DEFAULT_BUDGET_LINES.CIVIL],
+  PUBLICA: [...DEMO_DEFAULT_BUDGET_LINES.PUBLICA],
 };
 
 // Roof-type packages (APU templates) to be merged into Presupuestos.

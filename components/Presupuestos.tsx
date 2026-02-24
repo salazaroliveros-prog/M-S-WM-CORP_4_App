@@ -1562,15 +1562,16 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
 
   // CSV Export
   const handleExportCSV = () => {
-    if (visibleBudgetLines.length === 0) return;
-    
+    if (visibleBudgetLines.length === 0) {
+      setImportStatus({ type: 'info', message: 'No hay renglones para exportar.' });
+      return;
+    }
     const headers = ['Techo', 'Renglon', 'Unidad', 'Cantidad', 'CostoDirecto'];
     const roof = roofLabel(roofType);
     const rows = visibleBudgetLines.map(line => 
       `"${roof}","${line.name}","${line.unit}",${line.quantity},${line.directCost.toFixed(2)}`
     );
     const csvContent = [headers.join(','), ...rows].join('\n');
-    
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -1580,6 +1581,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    setImportStatus({ type: 'success', message: 'Presupuesto exportado correctamente en formato CSV.' });
   };
 
   // CSV Import and Validation
@@ -1600,7 +1602,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
     try {
       const lines = content.split('\n').filter(line => line.trim() !== '');
       if (lines.length < 2) {
-        setImportStatus({ type: 'error', message: 'El archivo está vacío o no contiene datos.' });
+        setImportStatus({ type: 'error', message: 'El archivo está vacío o no contiene datos para importar.' });
         return;
       }
 
@@ -1611,7 +1613,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
       if (missingColumns.length > 0) {
         setImportStatus({ 
           type: 'error', 
-          message: `Formato inválido. Faltan columnas requeridas: ${missingColumns.join(', ')}. Estándar: Renglon, Unidad, Cantidad` 
+          message: `Formato inválido. Faltan columnas requeridas: ${missingColumns.join(', ')}. El formato estándar es: Renglon, Unidad, Cantidad.` 
         });
         return;
       }
@@ -1653,14 +1655,14 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
         setBudgetLines(prev => [...prev, ...newLines]);
         setImportStatus({ 
           type: 'success', 
-          message: `Importación exitosa. ${newLines.length} renglones procesados. ${errorCount > 0 ? `${errorCount} filas ignoradas por errores de datos.` : ''}` 
+          message: `Importación de presupuesto exitosa: ${newLines.length} renglones agregados.${errorCount > 0 ? ` ${errorCount} filas ignoradas por errores de datos.` : ''}` 
         });
       } else {
-         setImportStatus({ type: 'info', message: 'No se encontraron filas válidas para importar.' });
+         setImportStatus({ type: 'info', message: 'No se encontraron filas válidas para importar en el archivo.' });
       }
 
     } catch (error) {
-      setImportStatus({ type: 'error', message: 'Error crítico al procesar el archivo. Verifique el formato CSV/TXT.' });
+      setImportStatus({ type: 'error', message: 'Error crítico al procesar el archivo. Verifique que el formato sea CSV/TXT válido.' });
     }
   };
 
@@ -1711,6 +1713,25 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
 
   return (
     <div className="space-y-6 relative">
+      {/* Botones de exportar/importar presupuesto */}
+      <div className="flex flex-wrap gap-3 mb-4">
+        <button
+          className="inline-flex items-center px-4 py-2 bg-mustard-500 hover:bg-mustard-600 text-navy-900 font-bold rounded shadow transition"
+          onClick={handleExportCSV}
+          title="Exportar presupuesto a CSV"
+        >
+          <Download size={18} className="mr-2" /> Exportar Presupuesto (CSV)
+        </button>
+        <label className="inline-flex items-center px-4 py-2 bg-mustard-500 hover:bg-mustard-600 text-navy-900 font-bold rounded shadow transition cursor-pointer">
+          <Upload size={18} className="mr-2" /> Importar Presupuesto (CSV)
+          <input
+            type="file"
+            accept=".csv,text/csv"
+            onChange={handleFileChange}
+            style={{ display: 'none' }}
+          />
+        </label>
+      </div>
       {/* APU Import Modal */}
       {apuImportOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">

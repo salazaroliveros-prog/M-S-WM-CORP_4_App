@@ -2353,8 +2353,8 @@ const App: React.FC = () => {
     setCloudAuthBusy(false);
     setCloudAuthError(null);
 
-    // Inicializa sesión de Supabase (si está configurado y habilitado en build-time)
-    if (isSupabaseConfigured && enableCloudLogin) {
+    // Inicializa sesión de Supabase si está configurado (siempre intentar conectar)
+    if (isSupabaseConfigured) {
       try {
         setCloudError(null);
         setCloudLoginAttempted(true);
@@ -2678,64 +2678,27 @@ const App: React.FC = () => {
                   </div>
                 )}
 
-                {showCloudAuth && (
-            <div className="mb-4 bg-amber-50 border border-amber-200 text-amber-900 p-3 rounded">
-              <div className="flex items-start justify-between gap-3 flex-wrap">
-                <div className="min-w-[240px]">
-                  <div className="font-semibold">Nube requiere iniciar sesión</div>
-                  <div className="text-xs text-amber-900/80 mt-0.5">
-                    Anonymous/Signups están deshabilitados en Supabase Auth. Inicia sesión con email/contraseña para habilitar sincronización y Realtime.
-                  </div>
-                </div>
-                <button
-                  onClick={() => setCloudAuthOpen((v) => !v)}
-                  className="px-3 py-1.5 rounded bg-amber-100 border border-amber-200 text-amber-900 text-sm font-semibold"
-                >
-                  {cloudAuthOpen ? 'Ocultar' : 'Conectar Nube'}
-                </button>
-              </div>
-
-              {cloudAuthOpen && (
-                <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2 items-end">
-                  <label className="text-xs">
-                    <div className="mb-1 font-semibold">Email (Supabase)</div>
-                    <input
-                      value={cloudAuthEmail}
-                      onChange={(e) => setCloudAuthEmail(e.target.value)}
-                      className="w-full px-3 py-2 border rounded"
-                      placeholder="correo@empresa.com"
-                      type="email"
-                      autoComplete="email"
-                    />
-                  </label>
-                  <label className="text-xs">
-                    <div className="mb-1 font-semibold">Contraseña (Supabase)</div>
-                    <input
-                      value={cloudAuthPassword}
-                      onChange={(e) => setCloudAuthPassword(e.target.value)}
-                      className="w-full px-3 py-2 border rounded"
-                      placeholder="********"
-                      type="password"
-                      autoComplete="current-password"
-                    />
-                  </label>
-                  <button
-                    onClick={() => void handleCloudConnect()}
-                    disabled={cloudAuthBusy}
-                    className="px-4 py-2 rounded bg-amber-200 border border-amber-300 text-amber-950 font-bold disabled:opacity-60"
-                  >
-                    {cloudAuthBusy ? 'Conectando...' : 'Conectar'}
-                  </button>
-
-                  {cloudAuthError && (
-                    <div className="sm:col-span-3 mt-1 text-sm text-red-700">
-                      {cloudAuthError}
+                {/* Replace detailed cloud-auth UI with a simple connection status banner per user request */}
+                <div className="mb-4 p-3 rounded">
+                  {isSupabaseConfigured ? (
+                    orgId ? (
+                      <div className="bg-green-50 border border-green-200 text-green-800 p-3 rounded">
+                        <strong>Conectado a Supabase</strong>
+                        <div className="text-sm">Organización activa: {orgId}</div>
+                      </div>
+                    ) : (
+                      <div className="bg-amber-50 border border-amber-200 text-amber-900 p-3 rounded">
+                        <strong>Supabase configurado, pero no conectado</strong>
+                        <div className="text-sm">La aplicación no ha establecido una sesión en la nube.</div>
+                      </div>
+                    )
+                  ) : (
+                    <div className="bg-gray-50 border border-gray-200 text-gray-700 p-3 rounded">
+                      <strong>Supabase no configurado</strong>
+                      <div className="text-sm">Define VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY para habilitar integración cloud.</div>
                     </div>
                   )}
                 </div>
-              )}
-            </div>
-                )}
               </>
             );
           })()}
