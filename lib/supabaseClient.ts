@@ -39,6 +39,22 @@ export function getSupabaseClient(): SupabaseClient {
   if (!client) {
     const isBrowser = typeof window !== 'undefined';
     const memoryStorage = !isBrowser ? createMemoryStorage() : undefined;
+    try {
+      // Debug helper: log only the host (no keys) so we can confirm which Supabase
+      // project the runtime is pointing at. This helps diagnose deployed builds.
+      if (isBrowser && supabaseUrl) {
+        try {
+          // only print host part, avoid exposing full URL or anon key
+          const host = new URL(supabaseUrl).host;
+          // eslint-disable-next-line no-console
+          console.debug('[diagnostic] Supabase host:', host);
+        } catch {
+          // ignore parse errors silently
+        }
+      }
+    } catch {
+      // noop
+    }
     client = createClient(supabaseUrl!, supabaseAnonKey!, {
       auth: {
         persistSession: true,
