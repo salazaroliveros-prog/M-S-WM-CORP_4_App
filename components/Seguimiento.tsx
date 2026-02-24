@@ -1699,9 +1699,9 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
             ))}
           </select>
         </div>
-            <div className="mt-4 max-w-full overflow-hidden">
-              <table className="w-full text-sm text-left table-fixed">
-            <table className="w-full text-sm text-left">
+        {showStockTable && selectedProjectId && stockMaterials.length > 0 && (
+          <div className="mt-4 max-w-full overflow-hidden">
+            <table className="w-full text-sm text-left table-fixed">
               <thead className="bg-gray-50">
                 <tr>
                   <th className="p-2">Material</th>
@@ -1713,9 +1713,9 @@ const Seguimiento: React.FC<Props> = ({ projects, useCloud = false, orgId = null
               </thead>
               <tbody>
                 {stockMaterials.map((row, i) => (
-                      <td className="p-2 break-words">{row.name}</td>
-                      <td className="p-2 break-words">{row.unit}</td>
-                    <td className="p-2">{row.unit}</td>
+                  <tr key={row.name + row.unit + i} className={row.restante < 0 ? 'bg-red-50' : ''}>
+                    <td className="p-2 break-words">{row.name}</td>
+                    <td className="p-2 break-words">{row.unit}</td>
                     <td className="p-2 text-right">{row.presup.toFixed(2)}</td>
                     <td className="p-2 text-right">{row.comprado.toFixed(2)}</td>
                     <td className={`p-2 text-right font-bold ${row.restante < 0 ? 'text-red-600' : 'text-green-700'}`}>{row.restante.toFixed(2)}</td>

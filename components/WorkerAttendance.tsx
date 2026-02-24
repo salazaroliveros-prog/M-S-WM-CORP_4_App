@@ -1,7 +1,38 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Fingerprint, LogIn, LogOut, RefreshCw, ShieldCheck, UserPlus } from 'lucide-react';
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { getAttendanceTokenInfo, pingAttendanceLocationWithToken, submitAttendanceWithToken, webauthnInvoke } from '../lib/db';
+
+type BgWatcherOptions = {
+  backgroundMessage?: string;
+  backgroundTitle?: string;
+  requestPermissions?: boolean;
+  stale?: boolean;
+  distanceFilter?: number;
+};
+
+type BgLocation = {
+  latitude: number;
+  longitude: number;
+  accuracy: number;
+  altitude: number | null;
+  altitudeAccuracy: number | null;
+  simulated: boolean;
+  bearing: number | null;
+  speed: number | null;
+  time: number | null;
+};
+
+type BgCallbackError = Error & { code?: string };
+
+type BgPlugin = {
+  addWatcher(options: BgWatcherOptions, callback: (pos?: BgLocation, error?: BgCallbackError) => void): Promise<string>;
+  removeWatcher(options: { id: string }): Promise<void>;
+  openSettings(): Promise<void>;
+};
+
+const BackgroundGeolocation = registerPlugin<BgPlugin>('BackgroundGeolocation');
 
 function todayISO() {
   const d = new Date();
@@ -157,6 +188,13 @@ const WorkerAttendance: React.FC = () => {
   }, []);
 
   const canUseGeolocation = typeof navigator !== 'undefined' && !!navigator.geolocation;
+  const isNative = useMemo(() => {
+    try {
+      return Capacitor.isNativePlatform();
+    } catch {
+      return false;
+    }
+  }, []);
 
   const isStandalone = useMemo(() => {
     try {
@@ -289,9 +327,10 @@ const WorkerAttendance: React.FC = () => {
     );
   };
 
-  // Keep GPS updated while the app is open (best-effort; browsers may pause in background).
+  // Keep GPS updated while the app is open (web).
   useEffect(() => {
     if (!token) return;
+    if (isNative) return;
     if (!canUseGeolocation) return;
 
     let watchId: number | null = null;
@@ -325,11 +364,68 @@ const WorkerAttendance: React.FC = () => {
     };
   }, [token, canUseGeolocation]);
 
+  // Native: background-safe location updates via Capacitor plugin.
+  useEffect(() => {
+    if (!token) return;
+    if (!isNative) return;
+
+    let watcherId: string | null = null;
+    let mounted = true;
+
+    (async () => {
+      try {
+        watcherId = await BackgroundGeolocation.addWatcher(
+          {
+            requestPermissions: true,
+            stale: true,
+            distanceFilter: 0,
+            backgroundTitle: 'M&S Construcción',
+            backgroundMessage: 'Rastreando ubicación para asistencia',
+          },
+          (pos, err) => {
+            if (!mounted) return;
+            if (err) {
+              setGeo({ status: 'error', error: err.message || 'No se pudo obtener ubicación.' });
+              return;
+            }
+            if (!pos) return;
+            setGeo({
+              status: 'ready',
+              lat: pos.latitude,
+              lng: pos.longitude,
+              accuracyM: pos.accuracy,
+            });
+          }
+        );
+      } catch (e: any) {
+        setGeo({ status: 'error', error: e?.message || 'No se pudo iniciar rastreo GPS.' });
+      }
+    })();
+
+    return () => {
+      mounted = false;
+      const id = watcherId;
+      watcherId = null;
+      if (!id) return;
+      try {
+        void BackgroundGeolocation.removeWatcher({ id });
+      } catch {
+        // ignore
+      }
+    };
+  }, [token, isNative]);
+
+  const lastPingAtRef = useRef(0);
+
   const pingLocation = async () => {
     if (!token) return;
     if (pingDisabledRef.current) return;
     const g = geoRef.current;
     if (g.status !== 'ready' || g.lat === undefined || g.lng === undefined) return;
+
+    const now = Date.now();
+    if (lastPingAtRef.current && now - lastPingAtRef.current < 60_000) return;
+    lastPingAtRef.current = now;
 
     const payload = {
       token,

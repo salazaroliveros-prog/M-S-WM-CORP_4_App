@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">M&amp;S Construcción</string>
+    <string name="title_activity_main">M&amp;S Construcción</string>
+    <string name="package_name">com.ms.construccion</string>
+    <string name="custom_url_scheme">com.ms.construccion</string>
+</resources>
