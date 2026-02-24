@@ -584,6 +584,7 @@ const SupabaseDiagnostics: React.FC<Props> = ({ orgId, enabled }) => {
 
       // 6) Attendance
       setStep('attendance', { status: 'running' });
+      if (!employeeId) throw new Error('No hay employeeId para asistencia (RRHH falló antes)');
       await setEmployeeAttendanceToken(employeeId, attendanceToken);
       await submitAttendanceWithToken({
         token: attendanceToken,

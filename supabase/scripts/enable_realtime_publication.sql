@@ -3,8 +3,12 @@
 -- Run this in Supabase SQL Editor if you want realtime subscriptions to emit
 -- `postgres_changes` events from supabase-js.
 --
--- Note: Supabase manages the `supabase_realtime` publication. This script only
--- adds tables to that publication if they are missing.
+-- Note: Supabase manages the `supabase_realtime` publication in most projects.
+-- This script is idempotent and will:
+-- 1) Create the publication if it does not exist (best-effort)
+-- 2) Ensure tables are added to the publication
+-- 3) Set `REPLICA IDENTITY FULL` (best-effort) so DELETE events can still be
+--    filtered by `org_id` (otherwise old rows may not include `org_id`).
 
 begin;
 
@@ -59,8 +63,17 @@ declare
   ];
 begin
   if not exists (select 1 from pg_publication where pubname = pub_name) then
-    raise notice 'Publication % not found. Enable Realtime in Supabase Dashboard first.', pub_name;
-    return;
+    begin
+      execute format('create publication %I', pub_name);
+      raise notice 'Created publication %', pub_name;
+    exception
+      when insufficient_privilege then
+        raise notice 'Publication % not found and could not be created (insufficient_privilege). Enable Realtime in Supabase Dashboard (Database → Replication → Realtime) and rerun.', pub_name;
+        return;
+      when others then
+        raise notice 'Publication % not found and could not be created (%). Enable Realtime in Supabase Dashboard (Database → Replication → Realtime) and rerun.', pub_name, sqlerrm;
+        return;
+    end;
   end if;
 
   foreach fqtn in array tables loop
@@ -71,6 +84,16 @@ begin
       raise notice 'Table not found, skipping: %', fqtn;
       continue;
     end if;
+
+    -- Best-effort: ensure old rows contain org_id on DELETE so filters work.
+    begin
+      execute format('alter table %s replica identity full', fqtn);
+    exception
+      when insufficient_privilege then
+        raise notice 'Could not set REPLICA IDENTITY FULL on % (insufficient_privilege)', fqtn;
+      when others then
+        raise notice 'Could not set REPLICA IDENTITY FULL on % (%)', fqtn, sqlerrm;
+    end;
 
     if not exists (
       select 1

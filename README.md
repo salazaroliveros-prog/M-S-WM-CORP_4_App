@@ -119,6 +119,8 @@ La app incluye un panel **Diagnóstico Supabase** que valida:
 - Que **Realtime** entrega eventos y que hay **cobertura** (suscripción) para las tablas principales.
 - Que al final se hace **limpieza** (borrado) de los datos de prueba creados por el diagnóstico.
 
+Si el diagnóstico muestra `Realtime: cobertura (todas las tablas)` con `faltan=...` (o da timeout en `transactions`), asegúrate de que las tablas estén habilitadas para Realtime en el proyecto Supabase. Forma rápida (idempotente): ejecuta [supabase/scripts/enable_realtime_publication.sql](supabase/scripts/enable_realtime_publication.sql) en **Database → SQL Editor**.
+
 ### Monitor Realtime (cross-dispositivo)
 
 Para comprobar que los cambios se ven en vivo desde **otro dispositivo** (sin escribir datos desde el monitor):

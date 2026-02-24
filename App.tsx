@@ -4,6 +4,7 @@ import { ViewState, Project, RequisitionData, QuoteInitialData } from './types';
 import { getSupabaseClient, isSupabaseConfigured } from './lib/supabaseClient';
 import {
   ensureSupabaseAnonymousSession,
+  ensureSupabaseSession,
   getConfiguredOrgId,
   resolveCloudOrgId,
   listProjects,
@@ -749,6 +750,12 @@ const App: React.FC = () => {
   const [orgId, setOrgId] = useState<string | null>(null);
   const [cloudError, setCloudError] = useState<string | null>(null);
   const [cloudLoginAttempted, setCloudLoginAttempted] = useState(false);
+  const [cloudNeedsAuth, setCloudNeedsAuth] = useState(false);
+  const [cloudAuthOpen, setCloudAuthOpen] = useState(false);
+  const [cloudAuthEmail, setCloudAuthEmail] = useState('');
+  const [cloudAuthPassword, setCloudAuthPassword] = useState('');
+  const [cloudAuthBusy, setCloudAuthBusy] = useState(false);
+  const [cloudAuthError, setCloudAuthError] = useState<string | null>(null);
 
   const [syncVersion, setSyncVersion] = useState(0);
   const realtimeChannelRef = useRef<any>(null);
@@ -805,6 +812,44 @@ const App: React.FC = () => {
     }
     const cached = readJson<Project[]>(LOCAL_PROJECTS_KEY, []);
     if (Array.isArray(cached)) setProjects(cached);
+  };
+
+  const isAnonymousAuthDisabledError = (e: any) => {
+    const msg = String(e?.message || e?.error_description || e || '').toLowerCase();
+    return (
+      msg.includes('anonymous sign-ins are disabled') ||
+      msg.includes('signups not allowed for this instance') ||
+      msg.includes('signup is disabled')
+    );
+  };
+
+  const startCloudForOrg = async (resolvedOrgId: string) => {
+    setOrgId(resolvedOrgId);
+    setCloudNeedsAuth(false);
+    setCloudAuthError(null);
+
+    await refreshProjects(resolvedOrgId);
+    await Promise.all([
+      syncOfflineProjects(resolvedOrgId),
+      syncOfflineTransactions(resolvedOrgId),
+      syncOfflineTransactionUpdates(resolvedOrgId),
+      syncOfflineTransactionDeletes(resolvedOrgId),
+      syncOfflineNotifications(resolvedOrgId),
+      scanRentDueSoon(resolvedOrgId),
+      syncOfflineRequisitions(resolvedOrgId),
+      syncOfflineEmployees(resolvedOrgId),
+      syncOfflineBudgets(resolvedOrgId),
+      syncOfflineProgress(resolvedOrgId),
+      syncOfflineSuppliers(resolvedOrgId),
+      syncOfflinePayRates(resolvedOrgId),
+      syncOfflineEmployeeOverrides(resolvedOrgId),
+      syncOfflineContracts(resolvedOrgId),
+      syncOfflineQuotes(resolvedOrgId),
+      syncOfflineAttendanceTokens(),
+      syncOfflineAttendanceManual(resolvedOrgId),
+      syncOfflineRequisitionMutations(resolvedOrgId),
+    ]);
+    await syncOfflineTransactions(resolvedOrgId);
   };
 
   // Centralized Realtime: bump syncVersion so modules can reload when open.
@@ -2234,12 +2279,30 @@ const App: React.FC = () => {
     setCloudError(null);
     setOrgId(null);
     setCloudLoginAttempted(false);
+    setCloudNeedsAuth(false);
+    setCloudAuthOpen(false);
+    setCloudAuthEmail('');
+    setCloudAuthPassword('');
+    setCloudAuthBusy(false);
+    setCloudAuthError(null);
 
     // Inicializa sesión de Supabase (si está configurado y habilitado en build-time)
     if (isSupabaseConfigured && enableCloudLogin) {
       try {
         setCloudError(null);
         setCloudLoginAttempted(true);
+
+        // Prefer persisted session (email/password, etc.) if available.
+        try {
+          const sess = await getSupabaseClient().auth.getSession();
+          if (sess.data.session?.access_token) {
+            const resolvedOrgId = await resolveCloudOrgId('M&S Construcción');
+            await startCloudForOrg(resolvedOrgId);
+            return;
+          }
+        } catch {
+          // ignore; will try anonymous below
+        }
 
         // Login cloud SIN credenciales: usamos una sesión anónima por dispositivo.
         // Esto permite CRUD/Realtime bajo RLS sin pedir email/contraseña de Supabase.
@@ -2251,35 +2314,44 @@ const App: React.FC = () => {
         }
 
         const resolvedOrgId = await resolveCloudOrgId('M&S Construcción');
-        setOrgId(resolvedOrgId);
-        await refreshProjects(resolvedOrgId);
-        await Promise.all([
-          syncOfflineProjects(resolvedOrgId),
-          syncOfflineTransactions(resolvedOrgId),
-          syncOfflineTransactionUpdates(resolvedOrgId),
-          syncOfflineTransactionDeletes(resolvedOrgId),
-          syncOfflineNotifications(resolvedOrgId),
-          scanRentDueSoon(resolvedOrgId),
-          syncOfflineRequisitions(resolvedOrgId),
-          syncOfflineEmployees(resolvedOrgId),
-          syncOfflineBudgets(resolvedOrgId),
-          syncOfflineProgress(resolvedOrgId),
-          syncOfflineSuppliers(resolvedOrgId),
-          syncOfflinePayRates(resolvedOrgId),
-          syncOfflineEmployeeOverrides(resolvedOrgId),
-          syncOfflineContracts(resolvedOrgId),
-          syncOfflineQuotes(resolvedOrgId),
-          syncOfflineAttendanceTokens(),
-          syncOfflineAttendanceManual(resolvedOrgId),
-          syncOfflineRequisitionMutations(resolvedOrgId),
-        ]);
-        await syncOfflineTransactions(resolvedOrgId);
+        await startCloudForOrg(resolvedOrgId);
       } catch (e: any) {
         console.error(e);
-        const msg = e?.message || 'Error inicializando Supabase para datos en la nube. La app seguirá funcionando en modo local en este dispositivo.';
-        setCloudLoginAttempted(true);
-        setCloudError(msg);
+        if (isAnonymousAuthDisabledError(e)) {
+          setCloudLoginAttempted(true);
+          setCloudError(null);
+          setCloudNeedsAuth(true);
+          setCloudAuthOpen(true);
+        } else {
+          const msg = e?.message || 'Error inicializando Supabase para datos en la nube. La app seguirá funcionando en modo local en este dispositivo.';
+          setCloudLoginAttempted(true);
+          setCloudError(msg);
+        }
       }
+    }
+  };
+
+  const handleCloudConnect = async () => {
+    if (!isSupabaseConfigured) return;
+    if (cloudAuthBusy) return;
+
+    setCloudAuthBusy(true);
+    setCloudAuthError(null);
+    setCloudError(null);
+    setCloudLoginAttempted(true);
+
+    try {
+      await ensureSupabaseSession(cloudAuthEmail, cloudAuthPassword);
+      const resolvedOrgId = await resolveCloudOrgId('M&S Construcción');
+      await startCloudForOrg(resolvedOrgId);
+      setCloudAuthOpen(false);
+    } catch (e: any) {
+      console.error(e);
+      const msg = e?.message || 'No se pudo conectar con la nube.';
+      setCloudAuthError(msg);
+      setCloudNeedsAuth(true);
+    } finally {
+      setCloudAuthBusy(false);
     }
   };
 
@@ -2355,6 +2427,12 @@ const App: React.FC = () => {
     setOrgId(null);
     setCloudError(null);
     setCloudLoginAttempted(false);
+    setCloudNeedsAuth(false);
+    setCloudAuthOpen(false);
+    setCloudAuthEmail('');
+    setCloudAuthPassword('');
+    setCloudAuthBusy(false);
+    setCloudAuthError(null);
   };
 
   const handleQuickBuy = (data: RequisitionData) => {
@@ -2442,9 +2520,11 @@ const App: React.FC = () => {
                 ? 'Modo local (sin nube)'
                 : !cloudLoginAttempted
                   ? 'Modo local (sin nube)'
-                  : orgId
-                    ? 'Nube sincronizada'
-                    : 'Conectando con nube...'}
+                  : cloudNeedsAuth
+                    ? 'Nube requiere login'
+                    : orgId
+                      ? 'Nube sincronizada'
+                      : 'Conectando con nube...'}
           </div>
         </div>
         <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
@@ -2480,6 +2560,65 @@ const App: React.FC = () => {
           {cloudError && (
             <div className="mb-4 bg-red-50 border border-red-200 text-red-700 p-3 rounded">
               <strong>Error Supabase:</strong> {cloudError}
+            </div>
+          )}
+
+          {!cloudError && isSupabaseConfigured && cloudLoginAttempted && !orgId && cloudNeedsAuth && (
+            <div className="mb-4 bg-amber-50 border border-amber-200 text-amber-900 p-3 rounded">
+              <div className="flex items-start justify-between gap-3 flex-wrap">
+                <div className="min-w-[240px]">
+                  <div className="font-semibold">Nube requiere iniciar sesión</div>
+                  <div className="text-xs text-amber-900/80 mt-0.5">
+                    Anonymous/Signups están deshabilitados en Supabase Auth. Inicia sesión con email/contraseña para habilitar sincronización y Realtime.
+                  </div>
+                </div>
+                <button
+                  onClick={() => setCloudAuthOpen((v) => !v)}
+                  className="px-3 py-1.5 rounded bg-amber-100 border border-amber-200 text-amber-900 text-sm font-semibold"
+                >
+                  {cloudAuthOpen ? 'Ocultar' : 'Conectar Nube'}
+                </button>
+              </div>
+
+              {cloudAuthOpen && (
+                <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2 items-end">
+                  <label className="text-xs">
+                    <div className="mb-1 font-semibold">Email (Supabase)</div>
+                    <input
+                      value={cloudAuthEmail}
+                      onChange={(e) => setCloudAuthEmail(e.target.value)}
+                      className="w-full px-3 py-2 border rounded"
+                      placeholder="correo@empresa.com"
+                      type="email"
+                      autoComplete="email"
+                    />
+                  </label>
+                  <label className="text-xs">
+                    <div className="mb-1 font-semibold">Contraseña (Supabase)</div>
+                    <input
+                      value={cloudAuthPassword}
+                      onChange={(e) => setCloudAuthPassword(e.target.value)}
+                      className="w-full px-3 py-2 border rounded"
+                      placeholder="********"
+                      type="password"
+                      autoComplete="current-password"
+                    />
+                  </label>
+                  <button
+                    onClick={() => void handleCloudConnect()}
+                    disabled={cloudAuthBusy}
+                    className="px-4 py-2 rounded bg-amber-200 border border-amber-300 text-amber-950 font-bold disabled:opacity-60"
+                  >
+                    {cloudAuthBusy ? 'Conectando...' : 'Conectar'}
+                  </button>
+
+                  {cloudAuthError && (
+                    <div className="sm:col-span-3 mt-1 text-sm text-red-700">
+                      {cloudAuthError}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -2519,6 +2658,10 @@ const App: React.FC = () => {
                    <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-gray-100 text-gray-700 border border-gray-200">
                      Modo local (sin nube)
                    </span>
+                  ) : cloudNeedsAuth ? (
+                    <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-amber-100 text-amber-700 border border-amber-200">
+                      Nube requiere login
+                    </span>
                  ) : orgId ? (
                    <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-green-100 text-green-700 border border-green-200">
                      Nube sincronizada
@@ -2638,7 +2781,7 @@ const App: React.FC = () => {
 
             {currentView === 'DIAGNOSTICO' && (
               isSupabaseConfigured && orgId ? (
-                <SupabaseDiagnostics />
+                <SupabaseDiagnostics orgId={orgId} enabled={isSupabaseConfigured} />
               ) : (
                 <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-4">
                   El diagnóstico requiere Supabase configurado y sesión activa en la nube.
