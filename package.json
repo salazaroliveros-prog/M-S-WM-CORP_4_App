@@ -21,6 +21,7 @@
     "@capacitor/android": "^8.1.0",
     "@capacitor/core": "^8.1.0",
     "@capacitor/geolocation": "^8.1.0",
+    "@capacitor/ios": "^8.1.0",
     "@simplewebauthn/browser": "^13.2.2",
     "@supabase/supabase-js": "^2.97.0",
     "jspdf": "^4.1.0",
