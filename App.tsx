@@ -817,6 +817,20 @@ const App: React.FC = () => {
         } catch {
           // ignore
         }
+        // If build-time automatic credentials are present, try them first.
+        const metaEnvLocal = ((import.meta as any).env ?? {}) as Record<string, any>;
+        const autoEmail = String(metaEnvLocal.VITE_SUPABASE_AUTO_EMAIL || '').trim();
+        const autoPassword = String(metaEnvLocal.VITE_SUPABASE_AUTO_PASSWORD || '');
+        if (autoEmail && autoPassword) {
+          try {
+            await ensureSupabaseSession(autoEmail, autoPassword);
+            const resolvedOrgId = await resolveCloudOrgId('M&S Construcción');
+            if (!cancelled) await startCloudForOrg(resolvedOrgId);
+            return;
+          } catch (e: any) {
+            console.warn('Auto email login failed during init, will try anonymous fallback:', e?.message || e);
+          }
+        }
 
         // Try anonymous sign-in; may fail if signups are disabled.
         try {

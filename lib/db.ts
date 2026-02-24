@@ -154,8 +154,24 @@ export async function ensureSupabaseAnonymousSession(): Promise<void> {
   const { data } = await supabase.auth.getSession();
   if (data.session?.access_token) return;
 
+  // If build-time automatic credentials are provided, prefer them.
+  try {
+    const metaEnv = (import.meta as any).env as Record<string, any> | undefined;
+    const env = metaEnv ?? (process.env as Record<string, any> | undefined) ?? {};
+    const autoEmail = (env.VITE_SUPABASE_AUTO_EMAIL as string | undefined) ?? '';
+    const autoPassword = (env.VITE_SUPABASE_AUTO_PASSWORD as string | undefined) ?? '';
+    if (String(autoEmail || '').trim() && String(autoPassword || '').length) {
+      await ensureSupabaseSession(String(autoEmail).trim(), String(autoPassword));
+      return;
+    }
+  } catch (e) {
+    // fall through to anonymous attempt
+    console.warn('Auto email login attempt failed in ensureSupabaseAnonymousSession', e);
+  }
+
   const res = await supabase.auth.signInAnonymously();
   if (res.error) {
+    // Propagate the error so callers can decide how to handle (UI prompt, fallback, etc.)
     throw new Error(
       `No se pudo iniciar sesión anónima en Supabase. Habilita "Anonymous sign-ins" en Supabase Auth, o usa un método de login real. Detalle: ${res.error.message}`
     );
