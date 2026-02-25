@@ -1,3 +1,4 @@
+import PropTypes from 'prop-types';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle, XCircle, Loader2, Play, Trash2 } from 'lucide-react';
 import type { BudgetLine } from '../types';
@@ -898,3 +899,8 @@ const SupabaseDiagnostics: React.FC<Props> = ({ orgId, enabled }) => {
 };
 
 export default SupabaseDiagnostics;
+
+SupabaseDiagnostics.propTypes = {
+  orgId: PropTypes.string,
+  enabled: PropTypes.bool.isRequired,
+};

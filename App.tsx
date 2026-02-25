@@ -1,3 +1,22 @@
+// --- MOCK FUNCTIONS FOR RRHH (for offline/local use or missing cloud) ---
+const mockAsync = (name: string, ret: any = null) => (...args: any[]) => {
+  console.warn(`Mock RRHH function called: ${name}`, args);
+  return Promise.resolve(ret);
+};
+
+const mockRRHHProps = {
+  onListEmployees: mockAsync('onListEmployees', []),
+  onCreateEmployee: mockAsync('onCreateEmployee', {}),
+  onListContracts: mockAsync('onListContracts', []),
+  onUpsertContract: mockAsync('onUpsertContract', {}),
+  onListAttendance: mockAsync('onListAttendance', []),
+  onSetAttendanceToken: mockAsync('onSetAttendanceToken'),
+  onLoadPayRates: mockAsync('onLoadPayRates', {}),
+  onSavePayRates: mockAsync('onSavePayRates'),
+  onLoadEmployeeRateOverrides: mockAsync('onLoadEmployeeRateOverrides', {}),
+  onUpsertEmployeeRateOverride: mockAsync('onUpsertEmployeeRateOverride'),
+  onDeleteEmployeeRateOverride: mockAsync('onDeleteEmployeeRateOverride'),
+};
 import React, { useState, useEffect, useRef } from 'react';
 import { LayoutDashboard, Wallet, HardHat, FileText, Activity, ShoppingCart, Users, Calculator, LogOut, Menu, X, Lock, Bell } from 'lucide-react';
 import { ViewState, Project, RequisitionData, QuoteInitialData } from './types';
@@ -2830,17 +2849,17 @@ const App: React.FC = () => {
                 syncVersion={syncVersion}
                 isAdmin={isSupabaseConfigured && !!orgId}
                 orgId={orgId}
-                onListEmployees={handleListEmployees}
-                onCreateEmployee={handleCreateEmployee}
-                onListContracts={handleListContracts}
-                onUpsertContract={handleUpsertContract}
-                onListAttendance={handleListAttendance}
-                onSetAttendanceToken={handleSetAttendanceToken}
-                onLoadPayRates={handleLoadPayRates}
-                onSavePayRates={handleSavePayRates}
-                onLoadEmployeeRateOverrides={handleLoadEmployeeRateOverrides}
-                onUpsertEmployeeRateOverride={handleUpsertEmployeeRateOverride}
-                onDeleteEmployeeRateOverride={handleDeleteEmployeeRateOverride}
+                onListEmployees={typeof handleListEmployees === 'function' ? handleListEmployees : mockRRHHProps.onListEmployees}
+                onCreateEmployee={typeof handleCreateEmployee === 'function' ? handleCreateEmployee : mockRRHHProps.onCreateEmployee}
+                onListContracts={typeof handleListContracts === 'function' ? handleListContracts : mockRRHHProps.onListContracts}
+                onUpsertContract={typeof handleUpsertContract === 'function' ? handleUpsertContract : mockRRHHProps.onUpsertContract}
+                onListAttendance={typeof handleListAttendance === 'function' ? handleListAttendance : mockRRHHProps.onListAttendance}
+                onSetAttendanceToken={typeof handleSetAttendanceToken === 'function' ? handleSetAttendanceToken : mockRRHHProps.onSetAttendanceToken}
+                onLoadPayRates={typeof handleLoadPayRates === 'function' ? handleLoadPayRates : mockRRHHProps.onLoadPayRates}
+                onSavePayRates={typeof handleSavePayRates === 'function' ? handleSavePayRates : mockRRHHProps.onSavePayRates}
+                onLoadEmployeeRateOverrides={typeof handleLoadEmployeeRateOverrides === 'function' ? handleLoadEmployeeRateOverrides : mockRRHHProps.onLoadEmployeeRateOverrides}
+                onUpsertEmployeeRateOverride={typeof handleUpsertEmployeeRateOverride === 'function' ? handleUpsertEmployeeRateOverride : mockRRHHProps.onUpsertEmployeeRateOverride}
+                onDeleteEmployeeRateOverride={typeof handleDeleteEmployeeRateOverride === 'function' ? handleDeleteEmployeeRateOverride : mockRRHHProps.onDeleteEmployeeRateOverride}
               />
             )}
             {currentView === 'COTIZADOR' && (

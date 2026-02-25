@@ -1,3 +1,7 @@
+import PropTypes from 'prop-types';
+// ...existing code...
+// Duplicate RRHH declaration removed. Only one RRHH component should exist.
+
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Project, Employee } from '../types';
 import { PAY_RATES } from '../constants';
@@ -173,7 +177,7 @@ function calcularMinutosFuera(asis: any[]): number {
   });
   return Math.round(total);
 }
-
+/* Moved RRHH.propTypes assignment to after RRHH component declaration */
 const RRHH: React.FC<Props> = ({
   projects,
   syncVersion,
@@ -2071,6 +2075,25 @@ const RRHH: React.FC<Props> = ({
       <ToastContainer aria-label="Notificaciones" />
     </div>
   );
+};
+
+
+RRHH.propTypes = {
+  projects: PropTypes.array.isRequired,
+  syncVersion: PropTypes.number,
+  isAdmin: PropTypes.bool,
+  orgId: PropTypes.string,
+  onListEmployees: PropTypes.func,
+  onCreateEmployee: PropTypes.func,
+  onListContracts: PropTypes.func,
+  onUpsertContract: PropTypes.func,
+  onListAttendance: PropTypes.func,
+  onSetAttendanceToken: PropTypes.func,
+  onLoadPayRates: PropTypes.func,
+  onSavePayRates: PropTypes.func,
+  onLoadEmployeeRateOverrides: PropTypes.func,
+  onUpsertEmployeeRateOverride: PropTypes.func,
+  onDeleteEmployeeRateOverride: PropTypes.func,
 };
 
 export default RRHH;

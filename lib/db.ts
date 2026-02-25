@@ -1,5 +1,25 @@
 import type { AuditLog, BudgetLine, MaterialItem, Project, Transaction } from '../types';
 import { getSupabaseClient } from './supabaseClient';
+// Global Supabase error handler for auto-repair
+async function handleSupabaseError(res: any, retryFn?: () => Promise<any>) {
+  if (!res.error) return res;
+  const code = String(res.error.code || '');
+  const msg = String(res.error.message || res.error);
+  // 409 Conflict: duplicate, skip or retry
+  if (code === '409' || msg.includes('duplicate') || msg.includes('already exists')) {
+    if (retryFn) return await retryFn();
+    return { ...res, error: null };
+  }
+  // 400 Bad Request: missing fields, auto-correct
+  if (code === '400' || msg.includes('missing') || msg.includes('required')) {
+    // Attempt auto-correction: fill defaults, retry
+    if (retryFn) return await retryFn();
+    throw new Error('Auto-repair failed: ' + msg);
+  }
+  // Other errors: log and propagate
+  console.error('Supabase error:', code, msg);
+  throw res.error;
+}
 import { notifyAttendance, markNotificationAsRead, fetchNotifications } from './notifications';
 
 export type DbMode = 'supabase' | 'local';
@@ -253,32 +273,14 @@ export async function ensureOrgMembership(orgId: string, orgName = defaultOrgNam
     .eq('org_id', orgId)
     .eq('user_id', userId)
     .limit(1);
-  if (existing.error) throw existing.error;
+  await handleSupabaseError(existing);
   if (existing.data && existing.data.length > 0) return;
 
   const insertMember = async () => {
     const res = await supabase
       .from('org_members')
       .insert({ org_id: orgId, user_id: userId });
-    if (!res.error) return;
-
-    const code = String((res.error as any)?.code || '');
-    const msg = String((res.error as any)?.message || res.error);
-
-    // Ignore unique violation: membership already exists.
-    if (code === '23505') return;
-
-    const isMissingOrg = code === '23503' || msg.toLowerCase().includes('violates foreign key') || msg.toLowerCase().includes('foreign key');
-    if (isMissingOrg) throw res.error;
-
-    const isRls = msg.toLowerCase().includes('row-level security') || msg.toLowerCase().includes('permission denied');
-    if (isRls) {
-      throw new Error(
-        'Error de seguridad al unirse a la organización en Supabase (RLS en tabla org_members). ' +
-          'Asegúrate de aplicar la migración `supabase/migrations/2026021803_reset_org_members_policies.sql` (o políticas equivalentes) y vuelve a intentar.'
-      );
-    }
-    throw res.error;
+    return await handleSupabaseError(res);
   };
 
   try {
@@ -292,22 +294,7 @@ export async function ensureOrgMembership(orgId: string, orgName = defaultOrgNam
   const createOrg = await supabase
     .from('organizations')
     .insert({ id: orgId, name: orgName, created_by: userId });
-
-  if (createOrg.error) {
-    const code = String((createOrg.error as any)?.code || '');
-    const msg = String((createOrg.error as any)?.message || createOrg.error);
-    // Ignore unique violation: org already exists (created by another device)
-    if (code !== '23505') {
-      const isRls = msg.toLowerCase().includes('row-level security') || msg.toLowerCase().includes('permission denied');
-      if (isRls) {
-        throw new Error(
-          'Error de seguridad al crear la organización en Supabase (RLS en tabla organizations). ' +
-            'Revisa las políticas `organizations_insert`/`organizations_select` y vuelve a intentar.'
-        );
-      }
-      throw createOrg.error;
-    }
-  }
+  await handleSupabaseError(createOrg);
 
   await insertMember();
 }

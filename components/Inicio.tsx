@@ -3,20 +3,6 @@ import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabaseClient';
 import { Project, Transaction, ViewState } from '../types';
 import { Save, DollarSign, CreditCard } from 'lucide-react';
 
-interface Props {
-  projects: Project[];
-  onViewChange: (view: ViewState) => void;
-  onCreateTransaction?: (tx: Transaction) => Promise<void>;
-}
-
-  // ...rest of the component code...
-
-  return (
-    // ...JSX...
-  );
-};
-import { Project, Transaction, ViewState } from '../types';
-import { Save, DollarSign, CreditCard } from 'lucide-react';
 
 interface Props {
   projects: Project[];

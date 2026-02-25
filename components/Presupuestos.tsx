@@ -1728,7 +1728,7 @@ const Presupuestos: React.FC<Props> = ({ projects, initialProjectId, syncVersion
             type="file"
             accept=".csv,text/csv"
             onChange={handleFileChange}
-            style={{ display: 'none' }}
+            className="hidden-file-input"
           />
         </label>
       </div>

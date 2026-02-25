@@ -1,43 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabaseClient';
-  // --- Realtime Supabase: actualizar automáticamente si hay cambios en cotizaciones ---
-  useEffect(() => {
-    let channel: any = null;
-    let mounted = true;
-    const setupRealtime = async () => {
-      if (!isSupabaseConfigured) return;
-      try {
-        const supabase = getSupabaseClient();
-        channel = supabase
-          .channel('quotes-realtime')
-          .on(
-            'postgres_changes',
-            { event: '*', schema: 'public', table: 'service_quotes' },
-            (payload: any) => {
-              if (!mounted) return;
-              // Refrescar historial de cotizaciones
-              if (onListQuotes) refreshHistory();
-            }
-          )
-          .subscribe();
-      } catch {
-        // ignore
-      }
-    };
-    setupRealtime();
-    return () => {
-      mounted = false;
-      if (channel) {
-        try {
-          const supabase = getSupabaseClient();
-          supabase.removeChannel(channel);
-        } catch {
-          // ignore
-        }
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onListQuotes]);
 import { QUOTE_SERVICES } from '../constants';
 import { QuoteInitialData } from '../types';
 import { Share2, Printer, Save, Trash2, RotateCcw } from 'lucide-react';
@@ -76,6 +38,44 @@ interface Props {
 }
 
 const Cotizador: React.FC<Props> = ({ initialData, syncVersion, onListQuotes, onUpsertQuote, onDeleteQuote }) => {
+    // --- Realtime Supabase: actualizar automáticamente si hay cambios en cotizaciones ---
+    useEffect(() => {
+      let channel: any = null;
+      let mounted = true;
+      const setupRealtime = async () => {
+        if (!isSupabaseConfigured) return;
+        try {
+          const supabase = getSupabaseClient();
+          channel = supabase
+            .channel('quotes-realtime')
+            .on(
+              'postgres_changes',
+              { event: '*', schema: 'public', table: 'service_quotes' },
+              (payload: any) => {
+                if (!mounted) return;
+                // Refrescar historial de cotizaciones
+                if (onListQuotes) refreshHistory();
+              }
+            )
+            .subscribe();
+        } catch {
+          // ignore
+        }
+      };
+      setupRealtime();
+      return () => {
+        mounted = false;
+        if (channel) {
+          try {
+            const supabase = getSupabaseClient();
+            supabase.removeChannel(channel);
+          } catch {
+            // ignore
+          }
+        }
+      };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [onListQuotes]);
   const [client, setClient] = useState('');
   const [phone, setPhone] = useState('');
   const [selectedService, setSelectedService] = useState('');
